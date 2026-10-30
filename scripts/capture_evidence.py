@@ -47,7 +47,8 @@ def setup():
         sp.lens = 24
     elif PRESET == "character":
         sc.frame_set(130)
-        sp.shading.type = 'MATERIAL'
+        sp.shading.type = 'RENDERED'          # the real scene lights + world, not a studio HDRI
+        sp.overlay.show_extras = False
         sc.camera = bpy.data.objects["CAM_S05_WebcamDoubt"]
         sp.region_3d.view_perspective = 'CAMERA'
     elif PRESET == "procedural":

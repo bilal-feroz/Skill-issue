@@ -78,3 +78,28 @@ Newest entries at the bottom. Records decisions, milestones, render settings and
   placeholder/no-overwrite mode: rerun the same command to continue after an interruption.
 - Recovery: if the .blend is lost, run the generators, then `build_scene.py`. Everything is
   deterministic. To re-render a range: `render_frames.py -- --preset final --frames A-B --overwrite`.
+
+## 2026-10-31: Delivery
+
+- Final render complete: 720/720 frames at 1920×1080 in ~60 min (~4.8 s/frame).
+- EEVEE logged "Shadow buffer full (2545/2048)" on the wide hall shots (Act IV). I inspected
+  those frames and saw no visibly missing shadows, so it was left as is. If a future change
+  shows popping shadows, raise `scene.eevee.shadow_pool_size` or lower the hall light count.
+- Post-render review found one broken shot: S20 (frames 491–502) rendered as a blurry smear
+  because the book tower on the notebook had grown around the over-the-shoulder camera.
+  It now has a high-angle over-the-shoulder camera, and frames 490–503 were re-rendered
+  (`--overwrite`). Everything else is deterministic, so the rest of the sequence is unchanged.
+- Assembled with `scripts/assemble_video.py` (libx264 CRF 16, preset slow, tune animation,
+  yuv420p, AAC 256 kbps, faststart): `renders/skill_issue_final.mp4`, 23.5 MB.
+- `scripts/validate_project.py`: 14/14 checks pass (720 frames present, consistent size,
+  H.264, 1920×1080, 24/1 fps, 720 frames decoded, yuv420p, 30.000 s, AAC present, audio 30.000 s,
+  decodes without errors, no unintended black). The .blend check (`-- --blend`) passes 7/7.
+- The soundtrack was regenerated from the final timeline before muxing. Sync points come
+  from the same frame table as the picture.
+
+### Known limitations
+- The character is a stylised primitive-built puppet. Fingers and cloth don't simulate, and
+  sleeves can show minor interpenetration in extreme poses.
+- Voice lines are processed Windows TTS (disclosed). A human performance would be warmer.
+- The far-loop field is a set of emissive instances (it reads as the system from 1 km up,
+  but has no detail up close).

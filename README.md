@@ -134,6 +134,13 @@ blender project/skill_issue.blend
 ```
 
 ```bash
+# or reproduce everything end to end (assets -> build -> render -> MP4 -> validation)
+python scripts/run_pipeline.py --blender "C:/Program Files/Blender Foundation/Blender 5.2/blender.exe"
+```
+
+Step by step:
+
+```bash
 # regenerate assets from the timeline (deterministic)
 python scripts/generate_screens.py
 ```
