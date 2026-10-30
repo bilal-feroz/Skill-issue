@@ -1,0 +1,4 @@
+# System-Python tools (screen graphics + audio synthesis).
+# Blender scripts use Blender's bundled Python and need nothing extra.
+pillow>=10.0
+numpy>=1.24
