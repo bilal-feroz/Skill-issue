@@ -55,3 +55,26 @@ Newest entries at the bottom. Records decisions, milestones, render settings and
   - The CAUGHT UP sign was mirrored and lost in glare. It's now a large panel sign above the gate.
 - Render benchmark (EEVEE, RTX 3050 4 GB): preview (50 %, 12 spp) ~2 s/frame;
   full 1080p (48 spp) ~6–9 s/frame; draft animatic (25 %, 4 spp) ~0.65 s/frame.
+
+## 2026-10-31: Timing review and final render
+
+- Rendered a full 480×270 draft animatic (720 frames, 412 s) and muxed it with the soundtrack
+  (`renders/skill_issue_animatic_v1.mp4`). I reviewed it as dense contact sheets (every 4th–8th frame).
+  Fixes that came out of it:
+  - The coffee sip never reached his mouth (the head-relative offset was in the wrong axes).
+    The mug now leads (`Hero.mug_world`) and the left hand follows it.
+  - The book towers were hidden from the front shot. They now rise on the notebook and beside the chair.
+  - The machine moved within reach so the BIG BUTTON slam lands on camera, and the core glow was toned down.
+  - The S10/S17 insert camera was inside the (backwards) chair backrest. The S15 camera was
+    inside a book tower.
+  - The whisper caption is composited (Alpha Over in the compositor, keyed per frame) because
+    a 3D text card either went out of focus or sat inside his head.
+  - The clock now races harder (16·s^2.6 min/frame).
+  - The pull-back arrives early and holds on the loop field. Motion-blur shutter is keyed down
+    during it.
+- Final render: preset `final` (1920×1080, EEVEE 48 spp, screen-space ray tracing + fast GI,
+  motion blur 0.42, AgX Medium High Contrast, compositor mist fog, fog glow, vignette),
+  ~4.8 s/frame, PNG frames to `renders/frames/` (git-ignored). Resumable with Blender's
+  placeholder/no-overwrite mode: rerun the same command to continue after an interruption.
+- Recovery: if the .blend is lost, run the generators, then `build_scene.py`. Everything is
+  deterministic. To re-render a range: `render_frames.py -- --preset final --frames A-B --overwrite`.

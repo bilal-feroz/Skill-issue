@@ -34,36 +34,39 @@ races. In Act IV it turns out to be a light box on the back of a stage flat.
 
 ## Shot list (source of truth: `scripts/skill_issue/timeline.py`)
 
-| Shot | Frames | Beat |
-|---|---|---|
-| S01 | 1–44 | Wide establishing push-in. He writes **LEARN AI.** |
-| S02 | 45–68 | Notebook insert, confident underline |
-| S03 | 69–92 | Webcam POV: smug smile, sip of coffee. *ding* |
-| S04 | 93–122 | Laptop: NEW MODEL RELEASED / NEW AGENT FRAMEWORK / NEW BENCHMARK. EVERYTHING CHANGED. |
-| S05 | 123–140 | Webcam: the smile slowly dies |
-| S06 | 141–160 | Notebook: he adds **FASTER** |
-| S07 | 161–184 | Hands: typing starts and accelerates |
-| S08 | 185–214 | Front: head snaps between screens, books stack themselves, cups multiply |
-| S09 | 215–232 | Desk dolly: digital clock races, papers slide, progress bars reset |
-| S10 | 233–256 | Laptop: tutorial at 2x → 4x → 16x |
-| S11 | 257–268 | Webcam: furious nodding |
-| S12 | 269–312 | **AI CAN NOW DO THAT FOR YOU.** Code. Notification. Code. Hold. |
-| S13 | 313–330 | **NEW MODEL. BETTER AT EVERYTHING.** Silent scream, crash zoom |
-| S14 | 331–362 | The idea. The agent machine assembles itself on the desk |
-| S15 | 363–386 | Machine wakes up: displays, cyan data tubes, BIG BUTTON |
-| S16 | 387–410 | He relaxes for the first time. Sip. *Roadmap ready.* |
-| S17 | 411–434 | **0 / 847 SKILLS MASTERED.** Scroll. Scroll. Scroll. |
-| S18 | 435–468 | Pull back: the roadmap prints as a paper scroll that snakes out of the door |
-| S19 | 469–490 | He looks at the scroll, the machine, then at us. Reaches for coffee |
-| S20 | 491–502 | **NEW RELEASE. ROADMAP OBSOLETE.** |
-| S21 | 503–516 | Silence. Empty face |
-| S22 | 517–552 | Closes the laptop, stands, stretches |
-| S23 | 553–584 | Walks to the door. Breath. *"Finally. I'm caught up."* |
-| S24 | 585–618 | He turns the handle and the walls fall flat. Orbit reveal: an endless conveyor hall |
-| S25 | 619–642 | PA: *"Congratulations. You are now an expert."* Pride |
-| S26 | 643–656 | Display: **NEW MODEL RELEASED. 10X FASTER.** Everything accelerates and his chair yanks him back |
-| S27 | 657–668 | Impossible pull-back: the belts form a giant closed loop, one of many |
-| S28 | 669–720 | Black. **SKILL ISSUE.** / *HUMANITY: STILL IN BETA.* |
+29 shots, 720 frames, 24 fps. Times are when each shot starts.
+
+| Shot | Frames | Starts | Beat |
+|---|---|---|---|
+| S01 | 1–44 | 0.00 s | Wide establishing push-in. He writes **LEARN AI.** |
+| S02 | 45–68 | 1.83 s | Notebook insert, confident underline |
+| S03 | 69–92 | 2.83 s | Webcam POV: smug smile, sip of coffee. *ding* |
+| S04 | 93–122 | 3.83 s | Laptop: NEW MODEL RELEASED / NEW AGENT FRAMEWORK / NEW BENCHMARK. EVERYTHING CHANGED. |
+| S05 | 123–140 | 5.08 s | Webcam: the smile slowly dies |
+| S06 | 141–160 | 5.83 s | Notebook: **LEARN AI FASTER.** |
+| S07 | 161–184 | 6.67 s | Hands: typing starts and accelerates |
+| S08 | 185–214 | 7.67 s | Front: head snaps between screens, books stack themselves, cups multiply |
+| S09 | 215–232 | 8.92 s | The digital clock races |
+| S10 | 233–256 | 9.67 s | Laptop: tutorial at 2x → 4x → 16x |
+| S11 | 257–268 | 10.67 s | Webcam: furious, understanding-nothing nodding |
+| S12 | 269–284 | 11.17 s | Laptop: **AI CAN NOW DO THAT FOR YOU.** |
+| S12b | 285–312 | 11.83 s | Code. Notification. Code. Hold (dead silence) |
+| S13 | 313–330 | 13.00 s | **NEW MODEL. BETTER AT EVERYTHING.** Silent scream, crash zoom |
+| S14 | 331–362 | 13.75 s | The idea. The agent machine assembles itself on the desk |
+| S15 | 363–386 | 15.08 s | Machine wakes up: displays, cyan data tubes. He slams the BIG BUTTON |
+| S16 | 387–410 | 16.08 s | He relaxes for the first time. Sip. *Roadmap ready.* |
+| S17 | 411–434 | 17.08 s | **0 / 847 SKILLS MASTERED.** Scroll. Scroll. Scroll. |
+| S18 | 435–468 | 18.08 s | Pull back: the roadmap prints as a paper scroll that snakes out under the door |
+| S19 | 469–490 | 19.50 s | He looks at the scroll, the machine, then at us. Reaches for coffee |
+| S20 | 491–502 | 20.42 s | **NEW RELEASE. ROADMAP OBSOLETE.** |
+| S21 | 503–516 | 20.92 s | Near silence. Empty face |
+| S22 | 517–538 | 21.50 s | Closes the laptop, stands, stretches |
+| S23 | 539–576 | 22.42 s | Walks to the door. Breath. *"Finally. I'm caught up."* |
+| S24 | 577–610 | 24.00 s | He turns the handle, the walls fall flat, and the camera orbits up into an endless conveyor hall |
+| S25 | 611–632 | 25.42 s | PA: *"Congratulations. You are now an expert."* Rows of identical students behind him. Pride |
+| S26 | 633–650 | 26.33 s | Display: **NEW MODEL RELEASED. 10X FASTER.** His chair yanks him back to the desk |
+| S27 | 651–672 | 27.08 s | Ballistic pull-back: his loop is one of many identical loops |
+| S28 | 673–720 | 28.00 s | **SKILL ISSUE.** / *HUMANITY: STILL IN BETA.* |
 
 ## Sound arc
 

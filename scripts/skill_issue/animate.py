@@ -236,6 +236,7 @@ class Hero:
         self.W["finish"] = V((0, 80, 6))
         self.W["display"] = V((-15.0, 24, 10.5))
         self.cam_pos = {}     # filled by cameras (for looking at the audience)
+        self.mug_rest = mw(R.mug)
         self.build_tracks()
 
     # ---- hand presets (return char-space wrist, fdir, palm, pole) ---------------
@@ -316,9 +317,52 @@ class Hero:
             return (w2c(M, wrist), d2c(M, fdir_w), d2c(M, palm_w), V((-0.6, 0.3, 0.6)))
         return spec
 
+    SIPS = ((E["sip1_start"], E["sip1_end"]), (E["sip2_start"], E["sip2_end"]))
+
+    def mug_blend(self, f):
+        b = 0.0
+        for s, e in self.SIPS:
+            up = U.ease(clamp((f - (s + 3)) / 4.0), "smooth")
+            down = U.ease(clamp((f - (e - 4)) / 4.0), "smooth")
+            b = max(b, up * (1 - down))
+        return b
+
+    def mug_world(self, f):
+        """Mug transform: on the desk, or tipped at his lips during a sip."""
+        rest = self.mug_rest
+        b = self.mug_blend(f)
+        if b <= 0:
+            return rest
+        D = self.spine_cache(f)
+        Hw = self.path.matrix(f) @ D["head"] @ self.solver.Rinv["head"]
+        R3 = Hw.to_3x3()
+        mouth = Hw @ V((0.0, -0.165, 1.462))
+        fwd = (R3 @ V((0, -1, 0))).normalized()
+        up = (R3 @ V((0, 0, 1))).normalized()
+        left = (R3 @ V((1, 0, 0))).normalized()
+        z = (up * 0.75 - fwd * 0.66).normalized()          # tipped toward the face
+        x = (left - z * left.dot(z)).normalized()
+        y = z.cross(x)
+        Mm = Matrix((x, y, z)).transposed().to_4x4()
+        Mm.translation = mouth + fwd * 0.06 - up * 0.075
+        l0, q0, _ = rest.decompose()
+        l1, q1, _ = Mm.decompose()
+        out = q0.slerp(q1, U.ease(b, "smooth")).to_matrix().to_4x4()
+        out.translation = l0.lerp(l1, U.ease(b, "smooth"))
+        return out
+
     def mug_grab_spec(self):
-        mug = self.W["mug"]
-        return self.world_hand("L", mug + V((-0.075, -0.01, 0.055)), (0.75, 0.6, -0.1), (0.95, 0.2, 0.0))
+        """Left hand wraps the mug from its left side, wherever the mug is."""
+        def spec(f):
+            M = self.path.matrix(f)
+            Mm = self.mug_world(f)
+            R3 = Mm.to_3x3()
+            c = Mm.translation + R3 @ V((0, 0, 0.05))
+            wrist = c + R3 @ V((0.085, 0.035, -0.015))
+            fdir = R3 @ V((-0.35, -0.94, 0.0))
+            palm = R3 @ V((-1.0, 0.0, 0.0))
+            return (w2c(M, wrist), d2c(M, fdir), d2c(M, palm), V((0.6, 0.25, 0.7)))
+        return spec
 
     def build_tracks(self):
         L, R = SpecTrack(), SpecTrack()
@@ -328,7 +372,7 @@ class Hero:
         lapR = self.world_hand("R", V((0.17, 0.98, 0.64)), (-0.2, 1, -0.6), (0, 0, -1))
         write = self.write_spec()
         mug_grab = self.mug_grab_spec()
-        sipL = self.head_hand("L", (0.03, -0.20, -0.06), (-0.2, -0.3, 0.9), (-0.9, 0.1, 0.1))
+        sipL = mug_grab
         e = E
         # ---- Act I ----
         R.key(1, write).key(e["underline1_end"] + 6, write).key(e["sip1_start"] + 2, lapR, "smooth")
@@ -450,7 +494,7 @@ class Hero:
         A.key(e["sip2_start"] + 3, at(Wp["laptop_screen"] + V((0, 0, 0.15))))
         A.key(e["roadmap_open"], at(Wp["laptop_screen"]), "smooth").key(e["print_start"] - 2, at(Wp["laptop_screen"]))
         A.key(e["print_start"] + 6, at(Wp["machine"] + V((0, -0.2, -0.1))), "smooth").key(e["print_end"], at(Wp["floor_scroll"]), "smooth")
-        A.key(e["look_scroll"], at(V((-0.5, 0.0, 0.0))), "out").key(e["look_machine"] - 1, at(V((-0.5, 0.0, 0.0))))
+        A.key(e["look_scroll"], at(V((-1.0, 0.45, 1.0))), "out").key(e["look_machine"] - 1, at(V((-1.0, 0.45, 1.0))))
         A.key(e["look_machine"] + 1, at(Wp["machine"]), "out").key(e["look_audience"] - 1, at(Wp["machine"]))
         A.key(e["look_audience"] + 1, cam, "out").key(e["reach_coffee"], cam)
         A.key(e["notif_obsolete"] - 2, at(Wp["mug"]), "smooth").key(e["notif_obsolete"] + 2, at(Wp["laptop_screen"]), "out")
@@ -866,21 +910,12 @@ def bake_props(ctx, hero):
     U.bake_vec(pen, "rotation_euler", FRAMES, rots)
     # hero mug: follows the left hand during sips (grab offset captured at grab time)
     mug = R.mug
-    mug_rest = mug.matrix_world.copy()
     locs, rots = [], []
-    holds = [(e["sip1_start"] + 2, e["sip1_end"]), (e["sip2_start"], e["sip2_end"] + 5)]
-    offsets = {}
     prev = None
-    cur = mug_rest
     for i, f in enumerate(FRAMES):
-        Mx = mug_rest
-        for a, b in holds:
-            if a <= f <= b:
-                if a not in offsets:
-                    ia = FRAMES.index(a)
-                    offsets[a] = hand_world(hero, ia, "L").inverted() @ mug_rest
-                Mx = hand_world(hero, i, "L") @ offsets[a]
+        Mx = hero.mug_world(f)
         l, q, _ = Mx.decompose()
+        l = l - hero.path.station_offset(f)
         e_ = q.to_euler('XYZ', prev) if prev else q.to_euler('XYZ')
         prev = e_
         locs.append(tuple(l)); rots.append(tuple(e_))
@@ -912,7 +947,7 @@ def spawn_clutter(ctx, hero):
     col = ctx.cols["Props"]
     rng = random.Random(77)
     top = R.top
-    stacks = [V((0.86, 1.36, top)), V((-0.55, 0.92, 0.0)), V((0.62, 0.70, 0.0))]
+    stacks = [V((0.47, 1.22, top + 0.009)), V((-0.47, 0.82, 0.0)), V((0.62, 0.70, 0.0))]
     heights = [0.0] * len(stacks)
     from . import bl_util as UU
     for ev in CH["events"]["books"]:
@@ -939,8 +974,8 @@ def spawn_clutter(ctx, hero):
                 s = 1.0 + (0.25 * math.exp(-t / 1.5) * math.cos(t * 1.6) if t >= 0 else 0.0)
                 scl.append((1 / s ** 0.5, 1 / s ** 0.5, s if t >= 0 else 1.05))
         U.bake_vec(b, "scale", FRAMES, scl)
-    cup_spots = [V((0.74, 1.10, top)), V((-0.12, 1.12, top)), V((0.96, 1.18, top)), V((0.30, 1.70, top)),
-                 V((-0.05, 1.66, top)), V((0.72, 1.40, top)), V((0.85, 1.55, top))]
+    cup_spots = [V((0.70, 1.42, top)), V((-0.12, 1.12, top)), V((0.94, 1.44, top)), V((0.30, 1.70, top)),
+                 V((-0.05, 1.66, top)), V((0.18, 1.71, top)), V((0.70, 1.30, top))]
     cup_mat = __import__("skill_issue.materials", fromlist=["x"]).random_color_material(
         "MAT_Cups", [(0.7, 0.68, 0.62, 1), (0.1, 0.25, 0.45, 1), (0.55, 0.1, 0.06, 1), (0.12, 0.12, 0.13, 1), (0.6, 0.5, 0.1, 1)], 0.3)
     from .room import _mug
@@ -1010,8 +1045,8 @@ def bake_machine(ctx):
     core = bpy.data.materials["MAT_CoreGlow"]
     core_v = []
     for f in FRAMES:
-        base = 6.0 * U.ease(clamp((f - on) / 8.0), "smooth")
-        flash = 30.0 * math.exp(-max(0, f - e["button_press"]) / 3.0) if f >= e["button_press"] else 0.0
+        base = 1.5 * U.ease(clamp((f - on) / 8.0), "smooth")
+        flash = 4.0 * math.exp(-max(0, f - e["button_press"]) / 3.0) if f >= e["button_press"] else 0.0
         pulse = 1.0 + 0.25 * math.sin(ch("beat_phase", f) * 2 * math.pi)
         dead = 1.0 - 0.85 * win(f, e["notif_obsolete"], 720, 2)
         core_v.append((base * pulse + flash) * dead)
@@ -1083,7 +1118,7 @@ def _bake_node_input(mat, node_name, inp, index, values):
 # The roadmap scroll: a ribbon that grows along a path out of the door
 # ---------------------------------------------------------------------------
 
-SCROLL_PATH = [(-0.33, 1.33, 0.785), (-0.36, 1.20, 0.757), (-0.38, 1.10, 0.755), (-0.39, 1.06, 0.70),
+SCROLL_PATH = [(-0.38, 1.27, 0.785), (-0.40, 1.18, 0.757), (-0.40, 1.10, 0.755), (-0.40, 1.06, 0.70),
                (-0.40, 1.03, 0.30), (-0.42, 0.96, 0.006), (-0.78, 0.55, 0.004), (-0.88, 0.02, 0.004),
                (-0.55, -0.48, 0.004), (0.15, -0.88, 0.004), (0.78, -0.66, 0.004), (1.12, -0.28, 0.004),
                (1.50, -0.30, 0.004), (1.78, -0.62, 0.004), (2.0, -0.72, 0.004), (2.6, -0.76, 0.004),
@@ -1356,4 +1391,5 @@ def run(ctx):
     build_extras(ctx)
     CAM.bake(ctx, hero)
     CAM.title(ctx)
+    CAM.captions(ctx)
     scene.frame_set(1)

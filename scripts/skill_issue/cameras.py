@@ -64,8 +64,8 @@ def build(ctx, hero):
            face, track((123, 32.0), (140, 40.0)), 2.8, 0.05))
     A(Shot("CAM_S07_Hands", [(161, 184)], track((161, (-0.37, 1.33, 0.87)), (184, (-0.34, 1.31, 0.86))),
            hands, track((161, 48.0)), 2.2, 0.35))
-    A(Shot("CAM_S08_Front", [(185, 214)], track((185, (-0.14, 1.64, 1.17)), (214, (-0.06, 1.56, 1.23))),
-           face, track((185, 26.0), (214, 24.0)), 4.0, 0.9))
+    A(Shot("CAM_S08_Front", [(185, 214)], track((185, (-0.12, 1.70, 1.06)), (214, (-0.06, 1.64, 1.09))),
+           lambda f: face(f).lerp(chest(f), 0.55), track((185, 22.0), (214, 20.0)), 4.0, 0.9))
     A(Shot("CAM_S09_Clock", [(215, 232)], track((215, (-0.30, 0.98, 0.93)), (232, (-0.38, 1.04, 0.88), "in")),
            const(W["clock"] + V((0.02, 0.02, -0.01))), track((215, 40.0), (232, 52.0)), 2.2, 0.8))
     screen_cam = (-0.17, 1.13, 0.98)
@@ -77,9 +77,9 @@ def build(ctx, hero):
            const(V((0.14, 1.06, 1.12))), track((285, 32.0)), 4.0, 0.03))
     A(Shot("CAM_S13_Scream", [(313, 330)], track((313, (0.03, 1.50, 1.10)), (318, (0.03, 1.30, 1.13), "expo_out"), (330, (0.03, 1.27, 1.14))),
            face, track((313, 26.0), (318, 40.0), (330, 44.0)), 2.8, 1.6))
-    A(Shot("CAM_S14_Build", [(331, 362)], track((331, (-0.78, 1.28, 1.32)), (362, (-0.68, 1.20, 1.26))),
+    A(Shot("CAM_S14_Build", [(331, 362)], track((331, (-0.88, 1.58, 1.28)), (362, (-0.80, 1.52, 1.22))),
            lerp_t(head, const(W["machine"]), 331, 345), track((331, 26.0)), 4.0, 0.7))
-    A(Shot("CAM_S15_Machine", [(363, 386)], track((363, (-0.72, 1.10, 1.02)), (386, (-0.66, 1.16, 0.99))),
+    A(Shot("CAM_S15_Machine", [(363, 386)], track((363, (-0.64, 1.00, 0.97)), (386, (-0.60, 1.05, 0.95))),
            const(W["machine"] + V((0.04, -0.04, -0.03))), track((363, 42.0), (386, 46.0)), 2.8, 0.3))
     A(Shot("CAM_S16_Relax", [(387, 410)], track((387, (0.10, 1.62, 1.42)), (410, (0.10, 1.60, 1.40))),
            lambda f: face(f).lerp(chest(f), 0.35), track((387, 28.0)), 4.0, 0.05))
@@ -92,10 +92,10 @@ def build(ctx, hero):
     A(Shot("CAM_S22_Stand", [(517, 538)], track((517, (-1.30, 0.22, 1.22)), (538, (-1.18, 0.10, 1.32))),
            chest, track((517, 26.0)), 4.0, 0.08))
     A(Shot("CAM_S23_Door", [(539, 576)], track((539, (-0.25, -0.95, 1.45)), (552, (1.70, -1.62, 1.52), "smooth"), (576, (1.86, -1.66, 1.56))),
-           head, track((539, 30.0), (556, 42.0), (576, 46.0)), 2.8, 0.1))
+           head, track((539, 30.0), (556, 34.0), (576, 35.0)), 2.8, 0.1))
     A(Shot("CAM_S24_Reveal", [(577, 610)],
            track((577, (1.86, -1.66, 1.56)), (588, (1.90, -1.80, 1.62)), (600, (2.9, -3.1, 2.4), "smooth"), (610, (1.25, -4.3, 2.95), "smooth")),
-           lerp_t(head, const(V((1.4, 30.0, 4.5))), 590, 606), track((577, 46.0), (590, 30.0), (610, 22.0)), 5.6, 0.25))
+           lerp_t(head, const(V((1.4, 30.0, 4.5))), 590, 606), track((577, 35.0), (590, 28.0), (610, 22.0)), 5.6, 0.25))
     A(Shot("CAM_S25_Proud", [(611, 632)], track((611, (1.30, 0.48, 1.66)), (632, (1.32, 0.34, 1.64))),
            face, track((611, 38.0), (632, 42.0)), 2.8, 0.1))
     A(Shot("CAM_S26_Display", [(633, 650)], track((633, (3.6, -3.0, 0.90)), (650, (3.6, -3.15, 0.88))),
@@ -264,3 +264,13 @@ def title(ctx):
         cs.append((1, 1, 1) if on else (0, 0, 0))
     cursor.location = (width / 2 + 0.14, -0.01, z - 0.62 + 0.02)
     U.bake_vec(cursor, "scale", FRAMES, cs, 'CONSTANT')
+
+
+def captions(ctx):
+    """Whisper caption: an overlay image alpha-composited during the whisper."""
+    comp = ctx.scene.compositing_node_group
+    if "CaptionAmount" not in comp.nodes:
+        return
+    a, b = E["whisper_start"] + 1, E["whisper_end"] - 2
+    vals = [1.0 if a <= f <= b else 0.0 for f in FRAMES]
+    U.bake(comp, 'nodes["CaptionAmount"].outputs[0].default_value', 0, FRAMES, vals, 'CONSTANT')

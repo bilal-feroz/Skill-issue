@@ -130,7 +130,7 @@ def compute():
 
         # -- Clock: real time when calm, hours per second when frantic -------
         if f < E["black"]:
-            clock += 1.0 / (60 * T.FPS) + 7.5 * (s ** 2.6) * (1.0 if f < E["close_laptop"] else 0.0)
+            clock += 1.0 / (60 * T.FPS) + 16.0 * (s ** 2.6) * (1.0 if f < E["close_laptop"] else 0.0)
         ch["clock_minutes"].append(clock)
 
         # -- Stress: integral of speed, never recovers ----------------------

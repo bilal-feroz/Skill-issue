@@ -305,11 +305,12 @@ def build(col_env, col_props, col_screens, screen_dir, seed=4242):
                                          U.bm_cylinder(0.0025, 0.012, 8, (0, 0, -0.006), radius2=0.0005)),
                         col_props, M.simple("MAT_PenBlue", (0.03, 0.08, 0.35, 1), 0.3))
     R.pen = pen
-    mug = _mug("Mug_Hero", col_props, M.simple("MAT_MugHero", (0.62, 0.12, 0.08, 1), 0.25))
+    mug = _mug("Mug_Hero", col_props, M.simple("MAT_MugHero", (0.72, 0.69, 0.62, 1), 0.22))
     mug.location = (-0.26, 1.16, top)
+    mug.rotation_euler = (0, 0, math.pi)          # handle toward his left hand
     R.mug = mug
     R.mug_proto = mug
-    clock = U.empty("DigitalClock", col_props, (-0.56, 1.20, top), size=0.05)
+    clock = U.empty("DigitalClock", col_props, (-0.53, 1.13, top), size=0.05)
     clock.rotation_euler = (0, 0, math.radians(25))
     cb = U.mesh_object("Clock_Body", U.bm_rounded_box((0.16, 0.06, 0.07), 0.012, 3, (0, 0, 0.035)), col_props, m_black)
     cb.rotation_euler = (math.radians(-12), 0, 0)

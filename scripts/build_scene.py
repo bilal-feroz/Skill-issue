@@ -60,8 +60,8 @@ def build(opts):
     print(f"[build] room {time.time() - t0:.1f}s")
     ctx.hero = C.build_character("Student", ctx.cols["Character"], "hero")
     print(f"[build] hero {time.time() - t0:.1f}s")
-    ctx.machine = MCH.build(ctx.cols["Props"], ctx.room.top, origin=(-0.36, 1.50))
-    ctx.machine.root.rotation_euler = (0, 0, 0.26)
+    ctx.machine = MCH.build(ctx.cols["Props"], ctx.room.top, origin=(-0.30, 1.40))
+    ctx.machine.root.rotation_euler = (0, 0, -0.20)
     print(f"[build] machine {time.time() - t0:.1f}s")
 
     # crowd: a lightweight clone of the hero, posed sitting & typing, then baked

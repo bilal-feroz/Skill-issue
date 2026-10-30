@@ -116,7 +116,36 @@ def compositor(scene):
     vig.inputs["Factor"].default_value = 1.0
     Lk.new(glare.outputs["Image"], vig.inputs[6])
     Lk.new(vmap.outputs["Result"], vig.inputs[7])
+    # caption overlay (whisper), factor keyed per frame by animate.py
+    import os
+    cap_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                            "assets", "screens", "caption_whisper.png")
+    last = vig.outputs[2]
+    if os.path.exists(cap_path):
+        img = N.new("CompositorNodeImage")
+        img.image = bpy.data.images.load(cap_path, check_existing=True)
+        img.location = (400, -300)
+        sc_ = N.new("CompositorNodeScale")
+        sc_.location = (600, -300)
+        try:
+            sc_.inputs["Type"].default_value = 'Render Size'
+        except Exception:
+            try:
+                sc_.space = 'RENDER_SIZE'
+            except Exception:
+                pass
+        Lk.new(img.outputs["Image"], sc_.inputs["Image"])
+        cap = N.new("ShaderNodeValue")
+        cap.name = "CaptionAmount"
+        cap.outputs[0].default_value = 0.0
+        cap.location = (600, -500)
+        ao = N.new("CompositorNodeAlphaOver")
+        ao.location = (800, 0)
+        Lk.new(last, ao.inputs["Background"])
+        Lk.new(sc_.outputs["Image"], ao.inputs["Foreground"])
+        Lk.new(cap.outputs[0], ao.inputs["Factor"])
+        last = ao.outputs["Image"]
     out = N.new("NodeGroupOutput")
-    out.location = (650, 0)
-    Lk.new(vig.outputs[2], out.inputs[0])
+    out.location = (1000, 0)
+    Lk.new(last, out.inputs[0])
     return ng

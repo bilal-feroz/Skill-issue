@@ -98,6 +98,26 @@ class G:
         return node.outputs["Value"] if op in ('DOT_PRODUCT', 'LENGTH', 'DISTANCE') else node.outputs["Vector"]
 
 
+def auto_layout(ng, dx=230, dy=190):
+    """Layered DAG layout so the generated node trees are readable in the editor."""
+    depth = {n: 0 for n in ng.nodes}
+    for _ in range(len(ng.nodes)):
+        changed = False
+        for l in ng.links:
+            d = depth[l.from_node] + 1
+            if d > depth[l.to_node]:
+                depth[l.to_node] = d
+                changed = True
+        if not changed:
+            break
+    cols = {}
+    for n in ng.nodes:
+        cols.setdefault(depth[n], []).append(n)
+    for d, nodes in cols.items():
+        for i, n in enumerate(nodes):
+            n.location = (d * dx, -i * dy + len(nodes) * dy / 2)
+
+
 def _track_curve(col):
     cu = bpy.data.curves.new("TrackCenterline", 'CURVE')
     cu.dimensions = '3D'
@@ -437,6 +457,7 @@ def build_crowd_gn(name, track_ob, station_col, armL, armR, head, screen, lanes,
     for geo in [desk_i] + arms + [hrot.outputs[0], st.outputs[0]]:
         g.l(geo, join.inputs[0])
     g.l(join.outputs[0], g.out.inputs[0])
+    auto_layout(g.ng)
     return g.ng
 
 
@@ -555,6 +576,7 @@ def build_far_gn(name, far_station, glow_ob, offsets, lanes=5, per_lane=150):
     g.l(iop.outputs[0], join.inputs[0])
     g.l(giop.outputs[0], join.inputs[0])
     g.l(join.outputs[0], g.out.inputs[0])
+    auto_layout(g.ng)
     return g.ng
 
 
