@@ -28,7 +28,8 @@ SHOTS = [
     dict(id="S09", start=215, end=232, cam="CAM_S09_Clock",       act=2, desc="Desk dolly: racing clock, cups, papers"),
     dict(id="S10", start=233, end=256, cam="CAM_S10_Tutorial",    act=2, desc="Laptop: tutorial 2x / 4x / 16x"),
     dict(id="S11", start=257, end=268, cam="CAM_S11_Nod",         act=2, desc="Webcam CU: furious nodding"),
-    dict(id="S12", start=269, end=312, cam="CAM_S12_Shoulder",    act=2, desc="AI CAN NOW DO THAT FOR YOU. The look."),
+    dict(id="S12", start=269, end=284, cam="CAM_S10_Tutorial",    act=2, desc="Laptop: AI CAN NOW DO THAT FOR YOU."),
+    dict(id="S12b", start=285, end=312, cam="CAM_S12_Shoulder",   act=2, desc="Code. Notification. Code. Hold."),
     dict(id="S13", start=313, end=330, cam="CAM_S13_Scream",      act=2, desc="NEW MODEL. Silent scream, crash zoom"),
     # ACT III: AUTOMATE THE SUFFERING
     dict(id="S14", start=331, end=362, cam="CAM_S14_Build",       act=3, desc="Idea + agent machine assembles"),
@@ -40,14 +41,13 @@ SHOTS = [
     dict(id="S20", start=491, end=502, cam="CAM_S04_Screen",      act=3, desc="ROADMAP OBSOLETE."),
     dict(id="S21", start=503, end=516, cam="CAM_S21_Empty",       act=3, desc="Silence. Empty face."),
     # ACT IV: THE PUNCHLINE
-    dict(id="S22", start=517, end=552, cam="CAM_S22_Stand",       act=4, desc="Closes laptop, stands, stretches"),
-    dict(id="S23", start=553, end=584, cam="CAM_S23_Door",        act=4, desc="Walks to door, breath, whisper"),
-    dict(id="S24", start=585, end=618, cam="CAM_S24_Reveal",      act=4, desc="Walls fall. Orbit reveal of the hall"),
-    dict(id="S25", start=619, end=642, cam="CAM_S25_Proud",       act=4, desc="CONGRATULATIONS. Proud."),
-    dict(id="S26", start=643, end=656, cam="CAM_S26_Display",     act=4, desc="Display: NEW MODEL 10X. Yanked back"),
-    dict(id="S27", start=657, end=668, cam="CAM_S27_Pullback",    act=4, desc="Impossible pull-back: the loop"),
-    dict(id="S28", start=669, end=720, cam="CAM_S28_Title",       act=5, desc="SKILL ISSUE. / HUMANITY: STILL IN BETA."),
-]
+    dict(id="S22", start=517, end=538, cam="CAM_S22_Stand",       act=4, desc="Closes laptop, stands, stretches"),
+    dict(id="S23", start=539, end=576, cam="CAM_S23_Door",        act=4, desc="Walks to door, breath, whisper"),
+    dict(id="S24", start=577, end=610, cam="CAM_S24_Reveal",      act=4, desc="Walls fall. Orbit reveal of the hall"),
+    dict(id="S25", start=611, end=632, cam="CAM_S25_Proud",       act=4, desc="CONGRATULATIONS. Proud."),
+    dict(id="S26", start=633, end=650, cam="CAM_S26_Display",     act=4, desc="Display: NEW MODEL 10X. Yanked back"),
+    dict(id="S27", start=651, end=672, cam="CAM_S27_Pullback",    act=4, desc="Impossible pull-back: the loop"),
+    dict(id="S28", start=673, end=720, cam="CAM_S28_Title",       act=5, desc="SKILL ISSUE. / HUMANITY: STILL IN BETA.")]
 
 # ---------------------------------------------------------------------------
 # Named story beats (frame numbers).  Everything animates off these.
@@ -66,7 +66,7 @@ E = dict(
     tutorial_2x=233, tutorial_4x=241, tutorial_16x=248,
     nod_start=257, nod_end=268,
     notif_do_that=270,                       # AI CAN NOW DO THAT FOR YOU.
-    look_code1=279, look_notif=290, look_code2=300,
+    look_code1=287, look_notif=295, look_code2=303,
     notif_better=313,                        # NEW MODEL. BETTER AT EVERYTHING.
     scream_start=316, scream_end=330,
     # Act III
@@ -78,15 +78,25 @@ E = dict(
     look_scroll=470, look_machine=475, look_audience=480, reach_coffee=486,
     notif_obsolete=492, silence_start=492, empty_face=503,
     # Act IV
-    close_laptop=519, stand_start=528, stand_end=540, stretch_start=538, stretch_end=552,
-    walk_start=554, walk_end=571, breath=573, whisper_start=575, whisper_end=596,
-    handle_turn=586, walls_fall_start=588, walls_land=599,
-    finish_recede_start=602, reach_student=606, run_student=604,
-    pa_start=611, pa_end=648,                # CONGRATULATIONS. YOU ARE NOW AN EXPERT.
-    realize=620, proud_start=632, proud_end=642,
-    display_flip=644, accelerate=648, yank=650, defeat=654,
-    pullback_start=657, black=669, title_slam=670, subtitle=682,
+    close_laptop=517, stand_start=524, stand_end=532, stretch_start=530, stretch_end=538,
+    walk_start=539, walk_end=552, breath=553, whisper_start=558, whisper_end=584,
+    handle_turn=578, walls_fall_start=580, walls_land=591,
+    finish_recede_start=594, run_student=596, reach_student=600,
+    pa_start=598, pa_end=634,                # chime at 598, voice ~601-634
+    realize=612, proud_start=622, proud_end=634,
+    display_flip=636, accelerate=640, yank=642, defeat=647,
+    pullback_start=651, black=673, title_slam=674, subtitle=686,
+    # Extra SFX sync points
+    laptop_clack=523, chair_roll=525, steps=[541, 546, 551], wall_creak=579,
+    machine_parts=[339, 343, 346, 349, 351, 353, 355, 357, 359],  # each part locks in
 )
+
+# Animation conventions shared by Blender and the audio synth:
+#   books : spawn frame f, fall 5 frames, land (thump) at f + 5
+#   cups  : pop in at f, settle (clink) at f + 2
+#   papers: slide in over f..f+6 (swish starts at f)
+#   toasts: small UI notification tick at f
+SPAWN_LAND_OFFSET = dict(books=5, cups=2, papers=0, toasts=0)
 
 # Laptop / phone notifications (screen generator + audio "ding" read this).
 NOTIFICATIONS = [

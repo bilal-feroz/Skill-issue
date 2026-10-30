@@ -49,13 +49,13 @@ SPEED_KEYS = [
     (492, 0.00, "step"),     # ROADMAP OBSOLETE -> silence
     (516, 0.00, "linear"),
     (520, 0.02, "smooth"),
-    (585, 0.03, "smooth"),
+    (579, 0.03, "smooth"),
     (600, 0.20, "smooth"),   # walls down, the system is visible
     (630, 0.32, "smooth"),
-    (647, 0.36, "smooth"),
-    (650, 1.00, "linear"),   # 10X FASTER
-    (668, 1.00, "smooth"),
-    (669, 0.00, "step"),     # black
+    (639, 0.36, "smooth"),
+    (643, 1.00, "linear"),   # 10X FASTER
+    (672, 1.00, "smooth"),
+    (673, 0.00, "step"),     # black
     (720, 0.00, "linear"),
 ]
 

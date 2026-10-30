@@ -1,0 +1,41 @@
+{
+  "installed_voices": [
+    "Microsoft David Desktop",
+    "Microsoft Zira Desktop"
+  ],
+  "engine": "Windows System.Speech.Synthesis.SpeechSynthesizer (SAPI 5, offline, built into Windows)",
+  "pa": {
+    "voice": "Microsoft Zira Desktop",
+    "rate": 7,
+    "dur_s": 1.189,
+    "parts": [
+      {
+        "text": "Congratulations.",
+        "file": "pa_1_r7.wav",
+        "sha256": "d8e12c6090201cc873af5a79294f44c376c86f0077771c978ec8f056becdb023"
+      },
+      {
+        "text": "You are now an expert.",
+        "file": "pa_2_r7.wav",
+        "sha256": "508dba367b3e9d56f601a01656b7407ce2ac6a17c518291327e34473819f15b3"
+      }
+    ]
+  },
+  "whisper": {
+    "voice": "Microsoft David Desktop",
+    "rate": 2,
+    "dur_s": 0.8679,
+    "parts": [
+      {
+        "text": "Finally.",
+        "file": "whisper_1_r2.wav",
+        "sha256": "4b6a9bb7645891839652c0c083bb83a5a41f50742d8fd53f8475e7c1509e29b6"
+      },
+      {
+        "text": "I'm caught up.",
+        "file": "whisper_2_r2.wav",
+        "sha256": "d76779f17862b8e29a8317a2fa5e2aa7cb8e76427178cda6f0a06a086f8274b2"
+      }
+    ]
+  }
+}
