@@ -53,8 +53,8 @@ FINGERS = [("index", 0.031, 0.046, 0.039, 0.0112),
            ("ring", -0.0105, 0.047, 0.039, 0.0111),
            ("pinky", -0.030, 0.037, 0.031, 0.0100)]
 
-EYE_R = 0.038
-EYE_POS = Vector((0.061, -0.133, 1.576))
+EYE_R = 0.035
+EYE_POS = Vector((0.054, -0.114, 1.585))     # big eyes on the head's midline, set wide
 HEAD_C = Vector((0.0, -0.005, 1.565))
 HEAD_R = 0.165
 
@@ -304,7 +304,7 @@ def _mouth_shapes():
     """
     n = 17
     xs = [-1 + 2 * i / (n - 1) for i in range(n)]
-    W = 0.044
+    W = 0.038
 
     def shape(width=1.0, up_curve=0.0, lo_curve=0.0, open_=0.0, corner=0.0, skew=0.0, teeth=0.3):
         cols = []
@@ -326,7 +326,7 @@ def _mouth_shapes():
         "Grin":   shape(1.15, -0.002, -0.010, 0.020, 0.012, teeth=0.45),
         "Weak":   shape(0.92, 0.001, 0.0005, 0.0, 0.003, skew=0.0025),
         "Frown":  shape(0.95, 0.003, 0.004, 0.0, -0.008),
-        "Scream": shape(0.80, 0.020, 0.000, 0.055, -0.002, teeth=0.18),
+        "Scream": shape(0.78, 0.016, 0.000, 0.036, -0.002, teeth=0.18),   # fits the short chin
         "O":      shape(0.45, 0.010, 0.002, 0.016, 0.0, teeth=0.0),
         "Flat":   shape(0.85, 0.0, 0.0, 0.0, 0.0),
         "Proud":  shape(1.05, -0.002, -0.004, 0.0, 0.008, skew=0.004),
@@ -340,7 +340,8 @@ def _mouth_object(name, col, head_ob, mats):
     projection onto the head surface (done once per shape key, in rest space).
     """
     n, shapes = _mouth_shapes()
-    center = Vector((0.0, -0.152, 1.468))
+    from .head_sculpt import MOUTH_C
+    center = Vector(MOUTH_C)
     inner_rows = 6
     R = 2 + inner_rows                      # upper, teeth, inner..., lower
 
@@ -392,9 +393,10 @@ def _mouth_object(name, col, head_ob, mats):
 
 
 def _brow_object(name, col, side, s, mat):
-    c = _mirror(Vector((0.063, -0.152, 1.628)), s)
-    pts = [Vector((-0.030 * s, 0.008, -0.006)), Vector((-0.010 * s, 0.000, 0.004)),
-           Vector((0.014 * s, 0.004, 0.006)), Vector((0.034 * s, 0.016, -0.002))]
+    # soft arched brows: the face's main acting tool
+    c = _mirror(Vector((0.054, -0.149, 1.641)), s)
+    pts = [Vector((-0.026 * s, 0.006, -0.003)), Vector((-0.008 * s, 0.000, 0.004)),
+           Vector((0.013 * s, 0.002, 0.005)), Vector((0.031 * s, 0.013, -0.002))]
     radii = [0.0085, 0.0095, 0.0085, 0.0055]
     bm = bmesh.new()
     rings = []
@@ -413,7 +415,7 @@ def _brow_object(name, col, side, s, mat):
         ring = []
         for k in range(segs):
             a = 2 * math.pi * k / segs
-            ring.append(bm.verts.new(p + x * math.cos(a) * r * 0.55 + y * math.sin(a) * r))
+            ring.append(bm.verts.new(p + x * math.cos(a) * r * 0.42 + y * math.sin(a) * r))
         rings.append(ring)
     for a, b in zip(rings, rings[1:]):
         for k in range(segs):
@@ -579,54 +581,51 @@ def build_character(name, col, lod="hero"):
     sub_hero = (1, 2) if lod == "hero" else (0, 0)
     parts = {}
 
-    # ---- head ----------------------------------------------------------
-    hb = _head_mesh(lod)
-    _eye_socket_shading(hb)
-    head = U.mesh_object(f"{name}_Head", hb, col, mat_skin)
+    # ---- head: one sculpted surface (Clay SDF), nose and ears blended in -----
+    from . import head_sculpt as HS
+    head = HS.build_head(f"{name}_Head", col, lod, EYE_POS, EYE_R)
+    head.data.materials.append(mat_skin)
     parts["head"] = head
-    # nose (slightly bulbous, a touch off-centre) and ears
-    nose = U.mesh_object(f"{name}_Nose", U.bm_sphere(1.0, 16, 10, (0.002, -0.169, 1.521), (0.020, 0.026, 0.027)), col, mat_skin)
-    nose.rotation_euler = (0, math.radians(3), 0)
-    parts["nose"] = nose
-    for side, s in SIDES:
-        ear_bm = U.bm_sphere(1.0, 14, 10, (0, 0, 0), (0.016, 0.032, 0.048))
-        bmesh.ops.rotate(ear_bm, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-14 * s), 3, 'Z'), verts=ear_bm.verts)
-        bmesh.ops.translate(ear_bm, vec=_mirror(Vector((0.160, 0.012, 1.556)), s), verts=ear_bm.verts)
-        parts[f"ear.{side}"] = U.mesh_object(f"{name}_Ear.{side}", ear_bm, col, mat_skin)
 
     # ---- eyes, lids, brows (separate objects, own pivots) ---------------
     ch.eyes, ch.lids, ch.lowlids, ch.brows = {}, {}, {}, {}
     for side, s in SIDES:
         c = _mirror(EYE_POS, s)
         er = EYE_R * (1.0 if side == "L" else 0.975)    # subtle asymmetry
-        e = U.mesh_object(f"{name}_Eye.{side}", U.bm_sphere(er, 32 if lod == "hero" else 12, 16 if lod == "hero" else 8), col, mat_eye)
+        e = U.mesh_object(f"{name}_Eye.{side}", U.bm_sphere(er, 64 if lod == "hero" else 12, 32 if lod == "hero" else 8), col, mat_eye)
         e.location = c
         ch.eyes[side] = e
-        lid = U.mesh_object(f"{name}_Lid.{side}", _lid_mesh(er * 1.085, True), col, [mat_skin, mat_lidrim])
+        lid = U.mesh_object(f"{name}_Lid.{side}", _lid_mesh(er * 1.13, True, 48 if lod == "hero" else 16, 14 if lod == "hero" else 6), col, [mat_skin, mat_lidrim])
+        if lod == "hero":                       # heavy upper lid: a thick shelf
+            sol = lid.modifiers.new("Thickness", 'SOLIDIFY')
+            sol.thickness = 0.0035
+            sol.offset = 1.0
         lid.location = c
         lid.rotation_euler = (math.radians(-40), 0, 0)
         ch.lids[side] = lid
-        low = U.mesh_object(f"{name}_LowLid.{side}", _lid_mesh(er * 1.07, False), col, [mat_bag, mat_lidrim])
+        low = U.mesh_object(f"{name}_LowLid.{side}", _lid_mesh(er * 1.07, False, 48 if lod == "hero" else 16, 14 if lod == "hero" else 6), col, [mat_bag, mat_lidrim])
         low.location = c
         low.rotation_euler = (math.radians(55), 0, 0)
         ch.lowlids[side] = low
         brow = _brow_object(f"{name}_Brow.{side}", col, side, s, mat_hair)
         ch.brows[side] = brow
     ch.mouth = _mouth_object(f"{name}_Mouth", col, head, mouth_mats)
-    ch.hair = _hair_object(f"{name}_Hair", col, mat_hair, lod)
-    fr, lens = _glasses(name, col, mat_frame, mat_lens, lod)
-    parts["glasses"] = fr
-    if lens:
-        parts["lens"] = lens
-
-    head_parts = [head, nose, parts["ear.L"], parts["ear.R"], ch.mouth, ch.hair, fr] + ([lens] if lens else [])
+    ch.hair = HS.build_hair(f"{name}_Hair", col, lod)
+    ch.hair.data.materials.append(mat_hair)
+    # (no glasses: the director's reference design keeps the eyes free)
+    head_parts = [head, ch.mouth, ch.hair]
     head_parts += list(ch.eyes.values()) + list(ch.lids.values()) + list(ch.lowlids.values()) + list(ch.brows.values())
     for ob in head_parts:
-        sub = (1, 2) if ob in (head, ch.hair) and lod == "hero" else ((0, 1) if ob in (nose,) + tuple(parts[k] for k in ("ear.L", "ear.R")) else None)
-        _finalize(ob, rig, rigid("head"), subsurf=sub if sub else None)
+        # the sculpted head and hair are already dense: no subdivision on top
+        _finalize(ob, rig, rigid("head"), subsurf=None)
 
     # ---- neck ---------------------------------------------------------
-    neck = U.mesh_object(f"{name}_Neck", U.bm_cylinder(0.05, 0.17, 20, (0, -0.004, 1.38)), col, mat_skin)
+    # a tapered tube with real rings (a one-span cylinder subdivides into a striped barrel),
+    # leaning slightly forward into the head
+    neck_bm = _tube([(0, 0.002, 1.290), (0, -0.004, 1.370), (0, -0.016, 1.455)],
+                    lambda t: 0.066 - 0.010 * t, segs=40 if lod == "hero" else 12,
+                    scale_xy=(1.0, 0.92), ring_count=16 if lod == "hero" else 4)
+    neck = U.mesh_object(f"{name}_Neck", neck_bm, col, mat_skin)
     _finalize(neck, rig, lambda co: {"chest": 1.0 - _smooth01((co.z - 1.30) / 0.08),
                                      "neck": _smooth01((co.z - 1.30) / 0.08) * (1 - _smooth01((co.z - 1.43) / 0.03)),
                                      "head": _smooth01((co.z - 1.43) / 0.03)}, subsurf=sub_hero)
@@ -635,7 +634,15 @@ def build_character(name, col, lod="hero"):
     prof = [(0.855, 0.180, 0.125), (0.875, 0.196, 0.136), (0.95, 0.200, 0.138), (1.02, 0.194, 0.132),
             (1.10, 0.198, 0.132), (1.18, 0.210, 0.138), (1.25, 0.212, 0.136), (1.29, 0.200, 0.128),
             (1.325, 0.160, 0.112), (1.35, 0.095, 0.085), (1.365, 0.075, 0.072)]
-    segs = 32 if lod == "hero" else 14
+    segs = 56 if lod == "hero" else 14
+    if lod == "hero":                      # resample the profile finely (smooth silhouette)
+        fine = []
+        for (z0, a0, b0), (z1, a1, b1) in zip(prof, prof[1:]):
+            for k in range(4):
+                t = k / 4
+                fine.append((z0 + (z1 - z0) * t, a0 + (a1 - a0) * t, b0 + (b1 - b0) * t))
+        fine.append(prof[-1])
+        prof = fine
     bm = bmesh.new()
     rings = []
     for z, rx, ry in prof:
@@ -668,13 +675,20 @@ def build_character(name, col, lod="hero"):
     _finalize(torso, rig, torso_w, subsurf=sub_hero)
     parts["hoodie"] = torso
     # hood bunched behind the neck, hem band, kangaroo pocket, drawstrings
-    hood = U.bm_torus(0.105, 0.046, 32 if lod == "hero" else 12, 12 if lod == "hero" else 6, (0, 0, 0), arc=math.radians(250))
+    hood = U.bm_torus(0.105, 0.046, 56 if lod == "hero" else 12, 18 if lod == "hero" else 6, (0, 0, 0), arc=math.radians(250))
     bmesh.ops.rotate(hood, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-35), 3, 'Z'), verts=hood.verts)
     bmesh.ops.scale(hood, vec=(1.0, 0.95, 0.75), verts=hood.verts)
     bmesh.ops.rotate(hood, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-12), 3, 'X'), verts=hood.verts)
     bmesh.ops.translate(hood, vec=(0, 0.035, 1.345), verts=hood.verts)
     hood_ob = U.mesh_object(f"{name}_Hood", hood, col, mat_hoodie)
     _finalize(hood_ob, rig, lambda co: {"chest": 0.7, "neck": 0.3}, subsurf=sub_hero)
+    # ribbed crew collar: hides the base of the neck (a long bare neck reads as a peg)
+    collar = U.bm_torus(0.071, 0.011, 48 if lod == "hero" else 12, 10 if lod == "hero" else 4, (0, 0, 0))
+    bmesh.ops.scale(collar, vec=(1.0, 0.93, 0.85), verts=collar.verts)
+    bmesh.ops.rotate(collar, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-8), 3, 'X'), verts=collar.verts)
+    bmesh.ops.translate(collar, vec=(0, -0.004, 1.378), verts=collar.verts)
+    collar_ob = U.mesh_object(f"{name}_Collar", collar, col, mat_hoodie)
+    _finalize(collar_ob, rig, lambda co: {"chest": 0.65, "neck": 0.35}, subsurf=sub_hero)
     hem = U.bm_torus(1.0, 0.016, segs, 6, (0, 0, 0))
     bmesh.ops.scale(hem, vec=(0.184, 0.128, 1.0), verts=hem.verts)
     for v in hem.verts:
@@ -719,7 +733,8 @@ def build_character(name, col, lod="hero"):
                 if u > 0.9:
                     r = 0.043
             return r
-        sb = _tube(path, rfn, segs=20 if lod == "hero" else 10, twist_ref=(0, -1, 0))
+        sb = _tube(path, rfn, segs=36 if lod == "hero" else 10, twist_ref=(0, -1, 0),
+                   ring_count=110 if lod == "hero" else None)
         sl = U.mesh_object(f"{name}_Sleeve.{side}", sb, col, mat_hoodie)
 
         def sw(co, sh=sh, el=el, wr=wr, side=side):
@@ -760,7 +775,7 @@ def build_character(name, col, lod="hero"):
         if lod == "hero":
             for cap, bname in digit_bms:
                 f_ob = U.mesh_object(f"{name}_Digit_{bname}", cap, col, mat_skin)
-                _finalize(f_ob, rig, rigid(bname), subsurf=(0, 1))
+                _finalize(f_ob, rig, rigid(bname), subsurf=(1, 2))
         else:
             # crowd: fuse fingers into a mitten shape weighted to the hand
             mit = U.bm_join(*[c for c, _ in digit_bms])
@@ -781,7 +796,8 @@ def build_character(name, col, lod="hero"):
                 return 0.090 - 0.030 * (d / L1)
             u = (d - L1) / 0.45
             return 0.060 - 0.004 * u + (0.01 * math.sin(u * 30) * u if u > 0.7 else 0)
-        jb = _tube(path, lr, segs=18 if lod == "hero" else 10, twist_ref=(0, -1, 0))
+        jb = _tube(path, lr, segs=32 if lod == "hero" else 10, twist_ref=(0, -1, 0),
+                   ring_count=120 if lod == "hero" else None)
         jeans = U.mesh_object(f"{name}_Jeans.{side}", jb, col, mat_denim)
 
         def jw(co, hp=hp, kn=kn, an=an, side=side):

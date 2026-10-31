@@ -15,14 +15,18 @@ from skill_issue import timeline as T  # noqa: E402
 def main():
     W, H = 1920, 1080
     text = "“" + T.WHISPER_LINE + "”"
-    font = ImageFont.truetype(os.path.join(ROOT, "assets", "fonts", "Inter.woff2"), 46)
-    font.set_variation_by_axes([24, 420])
+    font = ImageFont.truetype(os.path.join(ROOT, "assets", "fonts", "Inter.woff2"), 52)
+    font.set_variation_by_axes([24, 540])
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     tw = d.textlength(text, font=font)
     x, y = (W - tw) / 2, H - 150
+    # a soft dark pill behind the line: legible over a bright face or the hall glare
+    asc, desc = font.getmetrics()
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).text((x + 2, y + 3), text, font=font, fill=(0, 0, 0, 200))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle((x - 34, y - 14, x + tw + 34, y + asc + desc + 14), radius=30, fill=(0, 0, 0, 120))
+    sd.text((x + 2, y + 3), text, font=font, fill=(0, 0, 0, 220))
     shadow = shadow.filter(ImageFilter.GaussianBlur(4))
     img = Image.alpha_composite(shadow, img)
     ImageDraw.Draw(img).text((x, y), text, font=font, fill=(240, 238, 232, 255))

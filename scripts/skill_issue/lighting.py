@@ -45,6 +45,8 @@ def build(col, room, hall):
     L.lamp_spot = _light("LGT_LampSpot", col, 'SPOT', (0.70, 1.52, 1.12), 60.0, warm, 0.05,
                          target=(0.15, 1.15, 0.76), spot=(math.radians(110), 0.55))
     L.lamp_bounce = _light("LGT_LampBounce", col, 'AREA', (0.55, 1.35, 1.35), 9.0, warm, 0.6, target=(0.1, 0.7, 1.0))
+    # warm face key, motivated by the lamp: a large source (skill: a face key is never a bulb)
+    L.face_key = _light("LGT_FaceKey", col, 'AREA', (0.55, 1.22, 1.62), 26.0, (1.0, 0.74, 0.50), 0.55, target=(0.05, 0.90, 1.15))
     # screens
     L.laptop = _light("LGT_LaptopSpill", col, 'AREA', (0.02, 1.36, 0.90), 5.0, cool, 0.30, 0.19, target=(0.05, 0.75, 1.15))
     L.monitor = _light("LGT_MonitorSpill", col, 'AREA', (0.47, 1.58, 1.16), 7.0, cool, 0.6, 0.34, target=(0.05, 0.8, 1.15))
@@ -55,9 +57,14 @@ def build(col, room, hall):
     # soft room fill so the bedroom never goes to crushed black
     L.fill = _light("LGT_RoomFill", col, 'AREA', (-1.2, -1.0, 2.45), 18.0, (0.55, 0.6, 0.85), 2.5, target=(0.0, 0.5, 0.0))
     L.machine = None
+    # soft overhead cheat for the paper-follow shot (S19), motivated by the desk lamp spill
+    L.paper = _light("LGT_PaperFill", col, 'AREA', (-0.2, -0.1, 2.45), 0.0, (1.0, 0.82, 0.62), 2.6, rot=(0, 0, 0))
     # cold light leaking around the door: the outside world is brighter than it should be
     L.door_leak = _light("LGT_DoorLeak", col, 'AREA', (1.92, -0.82, 1.15), 0.0, (0.75, 0.82, 1.0), 0.9, 2.0,
                          rot=(0, 1.5708, 0))
+    # the whisper at the door: the same cold door light, as a soft key on his upturned face
+    L.whisper = _light("LGT_WhisperKey", col, 'AREA', (1.90, -1.22, 1.92), 0.0, (0.80, 0.87, 1.0), 0.5,
+                       target=(1.60, -0.93, 1.62))
     # ---- hall -----------------------------------------------------------
     L.hall = []
     for i, y in enumerate((-36, -12, 12, 36)):

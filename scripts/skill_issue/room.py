@@ -14,6 +14,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 from . import bl_util as U
+from . import timeline as T
 from . import materials as M
 
 ROOM = dict(x0=-2.0, x1=2.0, y0=-1.8, y1=1.8, h=2.6, t=0.08)
@@ -92,7 +93,7 @@ def build(col_env, col_props, col_screens, screen_dir, seed=4242):
     m_alu = M.metal("MAT_Aluminium", (0.55, 0.56, 0.58, 1), 0.3)
     m_fabric_bed = M.fabric("MAT_Duvet", (0.10, 0.17, 0.25, 1), 160, 0.9, 0.7, 0.3)
     m_sheet = M.fabric("MAT_Sheet", (0.55, 0.55, 0.52, 1), 160, 0.9, 0.5, 0.3)
-    m_rug = M.fabric("MAT_Rug", (0.30, 0.09, 0.07, 1), 80, 1.0, 0.4, 0.5)
+    m_rug = M.fabric("MAT_Rug", (0.10, 0.11, 0.13, 1), 80, 1.0, 0.4, 0.3)
 
     # ---- floor platform (also the conveyor station) -------------------------
     fl = U.mesh_object("Room_Floor", U.bm_box((4.2, 3.8, 0.04), (0, 0, -0.02)), col_env, m_floor, smooth=False)
@@ -218,7 +219,7 @@ def build(col_env, col_props, col_screens, screen_dir, seed=4242):
     lap.rotation_euler = (0, 0, math.radians(3))
     lb = U.mesh_object("Laptop_Base", U.bm_rounded_box((0.34, 0.235, 0.016), 0.006, 2, (0, 0, 0.008)), col_props, m_alu)
     lb.parent = lap
-    kb = _plane("Laptop_Keyboard", col_props, 0.29, 0.11, _keyboard_material(), (0, 0.03, 0.0165))
+    kb = _plane("Laptop_Keyboard", col_props, 0.29, 0.11, _keyboard_material(screen_dir), (0, 0.03, 0.0165))
     kb.parent = lap
     tp = _plane("Laptop_Trackpad", col_props, 0.10, 0.06, M.simple("MAT_Trackpad", (0.35, 0.36, 0.38, 1), 0.25), (0, -0.07, 0.0163))
     tp.parent = lap
@@ -289,7 +290,7 @@ def build(col_env, col_props, col_screens, screen_dir, seed=4242):
     lpage.parent = nbk
     rpage = _plane("Notebook_PageRight", col_screens, 0.205, 0.285,
                    M.image_emission("MAT_NotebookPage", f"{screen_dir}/notebook/notebook_0001.png", 0.0,
-                                    sequence=dict(first=1, count=232), with_bsdf=False),
+                                    sequence=dict(first=1, count=T.E["scrib_end"]), with_bsdf=False),
                    (0.105, 0, 0.0075))
     rpage.parent = nbk
     _make_page_diffuse(rpage.active_material)
@@ -388,8 +389,7 @@ def build(col_env, col_props, col_screens, screen_dir, seed=4242):
     pl.parent = shelf
 
     # ---- rug, backpack, pizza box, bin, cables, string lights, posters -------------
-    rug = U.mesh_object("Rug", U.bm_cylinder(0.9, 0.01, 48, (0.0, -0.2, 0.005)), col_props, m_rug)
-    rug.scale = (1.0, 0.75, 1.0)
+    # (no rug: it read as a dark blob in the wide paper-follow shot)
     bp = U.mesh_object("Backpack", U.bm_rounded_box((0.32, 0.2, 0.42), 0.08, 3, (0, 0, 0.21)), col_props,
                        M.fabric("MAT_Backpack", (0.04, 0.06, 0.05, 1), 120, 0.9, 0.5, 0.3))
     bp.location = (-0.95, 1.35, 0)
@@ -458,9 +458,38 @@ def _mug(name, col, mat):
     return ob
 
 
-def _keyboard_material():
+def _keyboard_material(screen_dir=None):
     m = bpy.data.materials.get("MAT_LaptopKeys")
     if m:
+        return m
+    import os
+    alb = os.path.join(screen_dir or "", "keyboard.png")
+    glow = os.path.join(screen_dir or "", "keyboard_glow.png")
+    if screen_dir and os.path.exists(alb) and os.path.exists(glow):
+        # a real keycap texture with backlit legends: reads as a keyboard in a close-up
+        m = bpy.data.materials.new("MAT_LaptopKeys")
+        m.use_nodes = True
+        nb = M.NB(m.node_tree)
+        nb.nodes.clear()
+        tc = nb.n("ShaderNodeTexCoord", (-900, 0))
+        ta = nb.n("ShaderNodeTexImage", (-650, 100))
+        ta.image = bpy.data.images.load(alb, check_existing=True)
+        tg = nb.n("ShaderNodeTexImage", (-650, -200))
+        tg.image = bpy.data.images.load(glow, check_existing=True)
+        for t in (ta, tg):
+            t.interpolation = 'Cubic'
+            nb.l(tc.outputs["UV"], t.inputs[0])
+        p = nb.n("ShaderNodeBsdfPrincipled", (-200, 0))
+        p.inputs["Roughness"].default_value = 0.58          # matte caps: no grazing glare
+        p.inputs["Specular IOR Level"].default_value = 0.25
+        nb.l(ta.outputs["Color"], p.inputs["Base Color"])
+        p.inputs["Emission Color"].default_value = (0.55, 0.75, 1.0, 1)
+        sm = nb.n("ShaderNodeMath", (-400, -200), _operation='MULTIPLY')
+        sm.inputs[1].default_value = 1.8
+        nb.l(tg.outputs["Color"], sm.inputs[0])
+        nb.l(sm.outputs[0], p.inputs["Emission Strength"])
+        out = nb.n("ShaderNodeOutputMaterial", (100, 0))
+        nb.l(p.outputs[0], out.inputs[0])
         return m
     m = bpy.data.materials.new("MAT_LaptopKeys")
     m.use_nodes = True

@@ -109,12 +109,33 @@ def compositor(scene):
     vmap.inputs["To Min"].default_value = 0.62
     vmap.inputs["To Max"].default_value = 1.0
     Lk.new(blur.outputs["Image"], vmap.inputs["Value"])
+    # light grade: cool lift, warm gain (split-tone), then a hint of lens dispersion
+    cb = N.new("CompositorNodeColorBalance")
+    cb.location = (100, 150)
+    try:
+        cb.inputs["Factor"].default_value = 0.5
+        cols = [i for i in cb.inputs if i.type == 'RGBA']
+        cols[0].default_value = (0.97, 0.99, 1.04, 1)   # lift: cool shadows
+        cols[1].default_value = (1.0, 1.0, 1.0, 1)      # gamma
+        cols[2].default_value = (1.04, 1.01, 0.97, 1)   # gain: warm highlights
+        Lk.new(glare.outputs["Image"], cb.inputs["Image"])
+        graded = cb.outputs["Image"]
+    except Exception:
+        graded = glare.outputs["Image"]
+    ld = N.new("CompositorNodeLensdist")
+    ld.location = (250, 150)
+    try:
+        ld.inputs["Dispersion"].default_value = 0.006
+        Lk.new(graded, ld.inputs["Image"])
+        graded = ld.outputs["Image"]
+    except Exception:
+        pass
     vig = N.new("ShaderNodeMix")
     vig.data_type = 'RGBA'
     vig.blend_type = 'MULTIPLY'
     vig.location = (400, 0)
     vig.inputs["Factor"].default_value = 1.0
-    Lk.new(glare.outputs["Image"], vig.inputs[6])
+    Lk.new(graded, vig.inputs[6])
     Lk.new(vmap.outputs["Result"], vig.inputs[7])
     # caption overlay (whisper), factor keyed per frame by animate.py
     import os

@@ -89,17 +89,42 @@ def skin():
         p.inputs["Subsurface Scale"].default_value = 0.02
         p.inputs["Specular IOR Level"].default_value = 0.45
         co = coords(nb, "rest", (-900, 0))
-        noise = nb.n("ShaderNodeTexNoise", (-700, 0), Scale=60.0, Detail=6.0)
+        noise = nb.n("ShaderNodeTexNoise", (-700, 0), Scale=35.0, Detail=3.0)
         nb.l(co, noise.inputs["Vector"])
         # blotchy warm variation (cheeks/nose a touch redder)
         ramp = nb.n("ShaderNodeValToRGB", (-450, 150))
-        ramp.color_ramp.elements[0].color = (0.36, 0.20, 0.13, 1)
-        ramp.color_ramp.elements[1].color = (0.44, 0.25, 0.16, 1)
+        ramp.color_ramp.elements[0].color = (0.42, 0.21, 0.12, 1)
+        ramp.color_ramp.elements[1].color = (0.50, 0.26, 0.15, 1)
         n2 = nb.n("ShaderNodeTexNoise", (-700, 250), Scale=4.0, Detail=2.0)
         nb.l(co, n2.inputs["Vector"])
         nb.l(n2.outputs["Fac"], ramp.inputs["Fac"])
-        nb.l(ramp.outputs[0], p.inputs["Base Color"])
-        _bump(nb, p, noise.outputs["Fac"], 0.08, 0.002)
+        # rosy cheeks and nose tip, in rest space so they stay put while he acts
+        blush = None
+        for i, (c, rad, amt) in enumerate((((0.064, -0.124, 1.522), 0.042, 0.55),
+                                           ((-0.064, -0.124, 1.522), 0.042, 0.55),
+                                           ((0.0, -0.172, 1.522), 0.026, 0.35))):
+            d = nb.n("ShaderNodeVectorMath", (-700, 450 + 150 * i), _operation='DISTANCE')
+            nb.l(co, d.inputs[0])
+            d.inputs[1].default_value = c
+            mr = nb.n("ShaderNodeMapRange", (-500, 450 + 150 * i))
+            mr.interpolation_type = 'SMOOTHSTEP'
+            mr.inputs["From Min"].default_value = rad
+            mr.inputs["From Max"].default_value = 0.0
+            mr.inputs["To Max"].default_value = amt
+            nb.l(d.outputs["Value"], mr.inputs["Value"])
+            if blush is None:
+                blush = mr.outputs["Result"]
+            else:
+                mx = nb.n("ShaderNodeMath", (-300, 450 + 150 * i), _operation='MAXIMUM')
+                nb.l(blush, mx.inputs[0])
+                nb.l(mr.outputs["Result"], mx.inputs[1])
+                blush = mx.outputs[0]
+        mix = nb.n("ShaderNodeMix", (-200, 150), _data_type='RGBA')
+        nb.l(blush, mix.inputs["Factor"])
+        nb.l(ramp.outputs[0], mix.inputs[6])
+        mix.inputs[7].default_value = (0.60, 0.21, 0.16, 1)
+        nb.l(mix.outputs[2], p.inputs["Base Color"])
+        _bump(nb, p, noise.outputs["Fac"], 0.02, 0.002)          # smooth animated-feature skin
     return m
 
 
@@ -144,15 +169,15 @@ def denim():
 def hair():
     m, nb = _new("MAT_Hair")
     if nb:
-        p, _ = _principled(nb, (0.022, 0.014, 0.010, 1), 0.48)
-        p.inputs["Specular IOR Level"].default_value = 0.35
+        p, _ = _principled(nb, (0.034, 0.021, 0.014, 1), 0.40)
+        p.inputs["Specular IOR Level"].default_value = 0.45
         co = coords(nb, "rest", (-1100, -200))
         w = nb.n("ShaderNodeTexNoise", (-650, -200), Scale=90.0, Detail=3.0)
         mp = nb.n("ShaderNodeMapping", (-850, -200))
-        mp.inputs["Scale"].default_value = (1.0, 1.0, 0.15)
+        mp.inputs["Scale"].default_value = (1.0, 0.12, 0.55)      # strands comb front to back
         nb.l(co, mp.inputs[0])
         nb.l(mp.outputs[0], w.inputs["Vector"])
-        _bump(nb, p, w.outputs["Fac"], 0.12, 0.002)
+        _bump(nb, p, w.outputs["Fac"], 0.22, 0.002)
     return m
 
 
@@ -174,12 +199,12 @@ def eye():
         cr.interpolation = 'LINEAR'
         cr.elements[0].position = 0.0
         cr.elements[0].color = (0.62, 0.60, 0.57, 1)      # sclera
-        cr.elements[1].position = 0.74
+        cr.elements[1].position = 0.70
         cr.elements[1].color = (0.55, 0.53, 0.50, 1)
-        e = cr.elements.new(0.755); e.color = (0.03, 0.018, 0.01, 1)   # limbal ring
-        e = cr.elements.new(0.78); e.color = (0.12, 0.06, 0.025, 1)    # iris outer
-        e = cr.elements.new(0.90); e.color = (0.24, 0.13, 0.05, 1)     # iris inner
-        e = cr.elements.new(0.915); e.color = (0.005, 0.005, 0.005, 1) # pupil
+        e = cr.elements.new(0.715); e.color = (0.03, 0.018, 0.01, 1)   # limbal ring
+        e = cr.elements.new(0.74); e.color = (0.12, 0.06, 0.025, 1)    # iris outer
+        e = cr.elements.new(0.88); e.color = (0.26, 0.14, 0.05, 1)     # iris inner
+        e = cr.elements.new(0.895); e.color = (0.005, 0.005, 0.005, 1) # pupil
         e = cr.elements.new(1.0); e.color = (0.0, 0.0, 0.0, 1)
         nb.l(dot.outputs["Value"], ramp.inputs[0])
         nb.l(ramp.outputs[0], p.inputs["Base Color"])

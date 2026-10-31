@@ -27,7 +27,7 @@ Creator: **Bilal Feroz**.
 | Resolution / rate | 1920 × 1080, 24 fps, 16:9 |
 | Engine | Blender 5.2.3 LTS, EEVEE (ray-traced screen-space GI/reflections, motion blur), 48 spp |
 | Audio | Original procedural score + SFX, 48 kHz stereo, −15 LUFS |
-| Shots | 29 (see [`docs/creative_direction.md`](docs/creative_direction.md)) |
+| Shots | 31 (see [`docs/creative_direction.md`](docs/creative_direction.md)) |
 | Hardware | RTX 3050 Laptop 4 GB, Ryzen 7 7435HS, ~5–6 s per final frame |
 
 ## Interpretation of speed
@@ -44,7 +44,8 @@ conveyor belts and the finish line.
 ## Procedural architecture
 
 The whole film is built and animated by code. `blender -b --factory-startup -P scripts/build_scene.py`
-recreates `project/skill_issue.blend` from nothing in about 6 seconds.
+recreates `project/skill_issue.blend` from nothing in about 30 seconds (most of it is meshing
+the sculpted head and hair).
 
 ```
 timeline.py ──► speed.py (SPEED controller: per-frame channels + spawn events, seeded)
@@ -61,8 +62,8 @@ timeline.py ──► speed.py (SPEED controller: per-frame channels + spawn eve
 ```
 
 **The speed system** (`scripts/skill_issue/speed.py`). `speed(f)` is a 0..1 curve with four
-phases: a slow opening, an escalating middle, dead stops on the punchlines (frames 273 and
-492), and an explosive ending. Each consumer gets a different response curve, lag and offset,
+phases: a slow opening, an escalating middle, dead stops on the punchlines (frames 245 and
+495), and an explosive ending. Each consumer gets a different response curve, lag and offset,
 so things accelerate together without moving in lockstep:
 
 | Channel | Response | Drives |
@@ -87,9 +88,12 @@ Each screen picks one of 16 announcement tiles through a per-instance `tile` att
 `GN_FarLoopField` repeats the system across a 5×5 grid of loops (24 more), each with its own
 unreachable finish glow. Columns are linked collection instances.
 
-**Character and acting.** `character.py` builds the student: an armature with analytically
-weighted deforming meshes, a shape-keyed mouth projected onto the head surface, procedural
-eyes and lids, and hair with *Messy* and *Blown* shape keys. A `rest_co` attribute keeps
+**Character and acting.** `head_sculpt.py` sculpts the head and hair as signed-distance
+fields (cranium, lower face, cheeks, nose and ears blended into one surface; the hair is a
+shell that follows the skull plus a quiff), meshed with OpenVDB through the vendored
+`bx_sculpt`. `character.py` builds the rest of the student: an armature with analytically
+weighted deforming meshes, a shape-keyed mouth projected onto the sculpted face, procedural
+eyes and lids, and *Messy* and *Blown* hair shape keys. A `rest_co` attribute keeps
 textures stuck to the deforming surface. `puppet.py` is a pose solver with analytic two-bone
 IK for arms and legs plus FK for the spine. `animate.py` describes the performance as
 pose-to-pose keys on world-space targets (keyboard, mug, button, door handle, hips), blended,
@@ -107,13 +111,16 @@ noise. Deterministic seeds are set in `speed.py` (SEED = 72024), `room.py`, `hal
 ```
 project/skill_issue.blend        the saved Blender project (rebuilt by build_scene.py)
 scripts/build_scene.py           entry point: builds and animates the whole film
-scripts/skill_issue/             timeline, speed controller, character, puppet (IK), room, machine,
-                                 track, hall (GN), animate (performance), cameras, lighting, render_setup
+scripts/skill_issue/             timeline, speed controller, character, head_sculpt (SDF head + hair),
+                                 puppet (IK), room, machine, track, hall (GN), animate (performance),
+                                 cameras, lighting, render_setup
+scripts/vendor/bx_sculpt.py      vendored MIT sculpting library (scenario-labs/skills)
 scripts/generate_screens.py      screen graphics (Pillow)        scripts/generate_audio.py  soundtrack (numpy)
 scripts/generate_clock.py        clock digits                    scripts/generate_captions.py  whisper caption
 scripts/render_frames.py         resumable renderer              scripts/assemble_video.py  FFmpeg mux
 scripts/validate_project.py      deliverable checks              scripts/capture_evidence.py  WIP screenshots
 scripts/contact_sheet.py         frame contact sheets for review
+scripts/audit_shots.py           ray-cast visibility audit: flags anything blocking a shot's camera
 assets/  audio/  renders/  evidence/  docs/
 ```
 
@@ -191,11 +198,16 @@ Genuine captures of the real Blender 5.2.3 UI and renders, taken during producti
 | 01: scene layout (solid view) | 03: `GN_CrowdStations` node tree + instanced crowd |
 | ![timeline](evidence/05_blender_timeline.png) | ![reveal](evidence/04_final_frame_preview.png) |
 | 05: SPEED_CONTROLLER channels + camera markers | 04: final render of the industrial reveal |
+| ![character](evidence/06_character_redesign.png) | ![lighting](evidence/02_character_and_lighting.png) |
+| 06: the redesigned student, turnaround render | 02: first-pass character in the rendered viewport |
 
 ## Disclosures
 
-No third-party 3D assets, textures, music or sound libraries were used. No generative image,
-video, 3D or music models were used. The project was produced with an AI coding agent
+No third-party 3D assets, textures, music or sound libraries were used. One MIT-licensed code
+module is vendored: `bx_sculpt.py` from [scenario-labs/skills](https://github.com/scenario-labs/skills),
+which meshes the sculpted head and hair. Those Blender skills also served as written craft
+guidance for sculpting, shot design and lighting. No generative image, video, 3D or music
+models were used. The project was produced with an AI coding agent
 (Claude by Anthropic, in Claude Code), which wrote the code that builds every asset. The two
 short voice lines are Windows' built-in offline text-to-speech, heavily processed. Fonts are
 Inter (OFL) and DejaVu Sans Mono (Bitstream Vera license), both bundled with Blender. Full

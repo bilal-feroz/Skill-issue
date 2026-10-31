@@ -15,80 +15,86 @@ FRAME_END = 720
 # Shot list.  camera = name of the camera object bound by a timeline marker.
 # ---------------------------------------------------------------------------
 SHOTS = [
-    # ACT I: FALSE CONFIDENCE
-    dict(id="S01", start=1,   end=44,  cam="CAM_S01_Establish",   act=1, desc="Wide push-in, writing LEARN AI."),
-    dict(id="S02", start=45,  end=68,  cam="CAM_S02_Notebook",    act=1, desc="Notebook insert, underline"),
-    dict(id="S03", start=69,  end=92,  cam="CAM_S03_Webcam",      act=1, desc="Webcam MCU: smug smile, coffee sip"),
-    dict(id="S04", start=93,  end=122, cam="CAM_S04_Screen",      act=1, desc="Laptop: three notifications stack"),
-    dict(id="S05", start=123, end=140, cam="CAM_S05_WebcamDoubt", act=1, desc="Webcam: smile fades"),
-    dict(id="S06", start=141, end=160, cam="CAM_S02_Notebook",    act=1, desc="Notebook: adds FASTER"),
-    # ACT II: THE ARMS RACE
-    dict(id="S07", start=161, end=184, cam="CAM_S07_Hands",       act=2, desc="Hands CU, typing accelerates"),
-    dict(id="S08", start=185, end=214, cam="CAM_S08_Front",       act=2, desc="Front MS: head snaps, books stack"),
-    dict(id="S09", start=215, end=232, cam="CAM_S09_Clock",       act=2, desc="Desk dolly: racing clock, cups, papers"),
-    dict(id="S10", start=233, end=256, cam="CAM_S10_Tutorial",    act=2, desc="Laptop: tutorial 2x / 4x / 16x"),
-    dict(id="S11", start=257, end=268, cam="CAM_S11_Nod",         act=2, desc="Webcam CU: furious nodding"),
-    dict(id="S12", start=269, end=284, cam="CAM_S10_Tutorial",    act=2, desc="Laptop: AI CAN NOW DO THAT FOR YOU."),
-    dict(id="S12b", start=285, end=312, cam="CAM_S12_Shoulder",   act=2, desc="Code. Notification. Code. Hold."),
-    dict(id="S13", start=313, end=330, cam="CAM_S13_Scream",      act=2, desc="NEW MODEL. Silent scream, crash zoom"),
-    # ACT III: AUTOMATE THE SUFFERING
-    dict(id="S14", start=331, end=362, cam="CAM_S14_Build",       act=3, desc="Idea + agent machine assembles"),
-    dict(id="S15", start=363, end=386, cam="CAM_S15_Machine",     act=3, desc="Machine CU: lights, tubes, BUTTON"),
-    dict(id="S16", start=387, end=410, cam="CAM_S16_Relax",       act=3, desc="He relaxes, sips; roadmap ready"),
-    dict(id="S17", start=411, end=434, cam="CAM_S17_Roadmap",     act=3, desc="Laptop: 0 / 847 skills, scroll"),
-    dict(id="S18", start=435, end=468, cam="CAM_S18_Scroll",      act=3, desc="Pull back: paper scroll out the door"),
-    dict(id="S19", start=469, end=490, cam="CAM_S19_Looks",       act=3, desc="Looks: scroll, machine, audience"),
-    dict(id="S20", start=491, end=502, cam="CAM_S04_Screen",      act=3, desc="ROADMAP OBSOLETE."),
-    dict(id="S21", start=503, end=516, cam="CAM_S21_Empty",       act=3, desc="Silence. Empty face."),
+    # ACT I: FALSE CONFIDENCE  (calm, locked-off, eye level)
+    dict(id="S01", start=1,   end=44,  cam="CAM_Establish",  act=1, desc="Wide push-in: he writes LEARN AI."),
+    dict(id="S02", start=45,  end=68,  cam="CAM_Notebook",   act=1, desc="Notebook insert: LEARN AI. underlined"),
+    dict(id="S03", start=69,  end=94,  cam="CAM_Webcam",     act=1, desc="Webcam MCU: smug smile, sip. Ding."),
+    dict(id="S04", start=95,  end=126, cam="CAM_Laptop",     act=1, desc="Laptop: three notifications stack"),
+    dict(id="S05", start=127, end=138, cam="CAM_Webcam",     act=1, desc="Webcam: the smile dies"),
+    dict(id="S06", start=139, end=156, cam="CAM_Notebook",   act=1, desc="Notebook: LEARN AI FASTER."),
+    # ACT II: THE ARMS RACE  (cuts and moves accelerate, one fact per shot)
+    dict(id="S07", start=157, end=176, cam="CAM_Keyboard",   act=2, desc="Keyboard insert: typing accelerates"),
+    dict(id="S08", start=177, end=196, cam="CAM_Montage",    act=2, desc="Three-quarter: head snaps, book tower, cups"),
+    dict(id="S08b", start=197, end=208, cam="CAM_Clock",     act=2, desc="The desk clock races"),
+    dict(id="S09", start=209, end=230, cam="CAM_Laptop",     act=2, desc="Laptop: tutorial 2x / 4x / 16x"),
+    dict(id="S10", start=231, end=240, cam="CAM_Webcam",     act=2, desc="Webcam: furious nodding"),
+    dict(id="S11", start=241, end=258, cam="CAM_Laptop",     act=2, desc="Laptop: AI CAN NOW DO THAT FOR YOU."),
+    dict(id="S12", start=259, end=284, cam="CAM_Profile",    act=2, desc="Code. Notification. Code. Hold."),
+    dict(id="S13", start=285, end=296, cam="CAM_Laptop",     act=2, desc="Laptop: NEW MODEL. BETTER AT EVERYTHING."),
+    dict(id="S14", start=297, end=310, cam="CAM_Scream",     act=2, desc="Silent scream, crash zoom"),
+    # ACT III: AUTOMATE THE SUFFERING  (slower, every beat held long enough to read)
+    dict(id="S15", start=311, end=348, cam="CAM_Build",      act=3, desc="The idea. The agent machine assembles itself"),
+    dict(id="S16", start=349, end=374, cam="CAM_Machine",    act=3, desc="Machine wakes. He slams the BIG BUTTON"),
+    dict(id="S17", start=375, end=398, cam="CAM_Relax",      act=3, desc="He finally relaxes. Sip. Chime."),
+    dict(id="S18", start=399, end=432, cam="CAM_Laptop",     act=3, desc="ROADMAP READY -> 0 / 847 SKILLS MASTERED -> scroll"),
+    dict(id="S19", start=433, end=452, cam="CAM_Printer",    act=3, desc="The machine prints his roadmap: the header hangs off the desk"),
+    dict(id="S19b", start=453, end=470, cam="CAM_PrinterWide", act=3, desc="...and keeps printing: paper floods the room toward the door"),
+    dict(id="S20", start=471, end=492, cam="CAM_Webcam",     act=3, desc="He looks at the paper... then at us. Reaches for coffee"),
+    dict(id="S21", start=493, end=516, cam="CAM_LaptopHigh", act=3, desc="NEW RELEASE. ROADMAP OBSOLETE."),
+    dict(id="S22", start=517, end=530, cam="CAM_Empty",      act=3, desc="Silence. Empty face"),
     # ACT IV: THE PUNCHLINE
-    dict(id="S22", start=517, end=538, cam="CAM_S22_Stand",       act=4, desc="Closes laptop, stands, stretches"),
-    dict(id="S23", start=539, end=576, cam="CAM_S23_Door",        act=4, desc="Walks to door, breath, whisper"),
-    dict(id="S24", start=577, end=610, cam="CAM_S24_Reveal",      act=4, desc="Walls fall. Orbit reveal of the hall"),
-    dict(id="S25", start=611, end=632, cam="CAM_S25_Proud",       act=4, desc="CONGRATULATIONS. Proud."),
-    dict(id="S26", start=633, end=650, cam="CAM_S26_Display",     act=4, desc="Display: NEW MODEL 10X. Yanked back"),
-    dict(id="S27", start=651, end=672, cam="CAM_S27_Pullback",    act=4, desc="Impossible pull-back: the loop"),
-    dict(id="S28", start=673, end=720, cam="CAM_S28_Title",       act=5, desc="SKILL ISSUE. / HUMANITY: STILL IN BETA.")]
+    dict(id="S23", start=531, end=548, cam="CAM_Stand",      act=4, desc="Closes the laptop, stands"),
+    dict(id="S24", start=549, end=584, cam="CAM_Door",       act=4, desc="Walks to the door. Breath. Whisper."),
+    dict(id="S25", start=585, end=618, cam="CAM_Reveal",     act=4, desc="Walls fall. Orbit reveal of the hall"),
+    dict(id="S26", start=619, end=638, cam="CAM_Proud",      act=4, desc="CONGRATULATIONS. Pride."),
+    dict(id="S27", start=639, end=654, cam="CAM_Display",    act=4, desc="Display: 10X FASTER. Yanked back"),
+    dict(id="S28", start=655, end=674, cam="CAM_Pullback",   act=4, desc="Impossible pull-back: the loop"),
+    dict(id="S29", start=675, end=720, cam="CAM_Title",      act=5, desc="SKILL ISSUE. / HUMANITY: STILL IN BETA."),
+]
 
 # ---------------------------------------------------------------------------
 # Named story beats (frame numbers).  Everything animates off these.
 # ---------------------------------------------------------------------------
 E = dict(
     # Act I
-    write1_start=6, write1_end=40,          # "LEARN AI."
-    underline1_start=47, underline1_end=56,
+    write1_start=8, write1_end=52,          # "LEARN AI."  (last letters land in the S02 insert)
+    underline1_start=54, underline1_end=62,
     smile_start=70, sip1_start=74, sip1_end=88,
-    notif1=90, notif2=103, notif3=114,      # stacked on laptop
-    glance1=92, smile_fade_start=124, smile_fade_end=136,
-    write2_start=143, write2_end=157,       # "FASTER"
+    notif1=92, notif2=104, notif3=115,      # stacked on the laptop
+    glance1=94, smile_fade_start=128, smile_fade_end=136,
+    write2_start=141, write2_end=153,       # "LEARN AI FASTER."
     # Act II
-    typing_start=161, typing_stop=272,
-    snaps=[188, 195, 200, 204, 207, 210, 212],   # head snaps laptop <-> monitor
-    tutorial_2x=233, tutorial_4x=241, tutorial_16x=248,
-    nod_start=257, nod_end=268,
-    notif_do_that=270,                       # AI CAN NOW DO THAT FOR YOU.
-    look_code1=287, look_notif=295, look_code2=303,
-    notif_better=313,                        # NEW MODEL. BETTER AT EVERYTHING.
-    scream_start=316, scream_end=330,
+    typing_start=157, typing_stop=244,
+    snaps=[181, 188, 193, 197, 200, 203, 205],   # head snaps laptop <-> monitor
+    tutorial_2x=209, tutorial_4x=216, tutorial_16x=223,
+    nod_start=231, nod_end=240,
+    notif_do_that=242,                       # AI CAN NOW DO THAT FOR YOU.
+    look_code1=262, look_notif=270, look_code2=278,
+    notif_better=285,                        # NEW MODEL. BETTER AT EVERYTHING.
+    scream_start=298, scream_end=310,
     # Act III
-    idea=332, build_start=338, build_end=360,
-    machine_lights=363, button_press=377,
-    lean_back=388, sip2_start=392, sip2_end=404, notif_roadmap=400,
-    roadmap_open=411, scroll_start=415,
-    print_start=437, print_end=466,
-    look_scroll=470, look_machine=475, look_audience=480, reach_coffee=486,
-    notif_obsolete=492, silence_start=492, empty_face=503,
+    idea=312, build_start=318, build_end=344,
+    machine_lights=350, button_press=363,
+    lean_back=377, sip2_start=380, sip2_end=392, notif_roadmap=388,
+    roadmap_open=408, scroll_start=420,
+    print_start=433, print_end=468,
+    look_scroll=474, look_machine=479, look_audience=484, reach_coffee=488,
+    notif_obsolete=495, silence_start=495, empty_face=517,
     # Act IV
-    close_laptop=517, stand_start=524, stand_end=532, stretch_start=530, stretch_end=538,
-    walk_start=539, walk_end=552, breath=553, whisper_start=558, whisper_end=584,
-    handle_turn=578, walls_fall_start=580, walls_land=591,
-    finish_recede_start=594, run_student=596, reach_student=600,
-    pa_start=598, pa_end=634,                # chime at 598, voice ~601-634
-    realize=612, proud_start=622, proud_end=634,
-    display_flip=636, accelerate=640, yank=642, defeat=647,
-    pullback_start=651, black=673, title_slam=674, subtitle=686,
+    close_laptop=531, stand_start=538, stand_end=546, stretch_start=546, stretch_end=546,
+    walk_start=549, walk_end=560, breath=562, whisper_start=564, whisper_end=588,
+    handle_turn=584, walls_fall_start=586, walls_land=597,
+    finish_recede_start=600, run_student=602, reach_student=606,
+    pa_start=604, pa_end=640,                # chime at 604, voice right after
+    realize=620, proud_start=627, proud_end=640,
+    display_flip=641, accelerate=645, yank=647, defeat=652,
+    pullback_start=655, black=675, title_slam=676, subtitle=688,
     # Extra SFX sync points
-    laptop_clack=523, chair_roll=525, steps=[541, 546, 551], wall_creak=579,
-    machine_parts=[339, 343, 346, 349, 351, 353, 355, 357, 359],  # each part locks in
+    laptop_clack=537, chair_roll=538, steps=[551, 555, 559], wall_creak=585,
+    machine_parts=[319, 322, 325, 328, 331, 334, 337, 340, 343],  # each part locks in
+    # Screen-graphics phase boundaries (independent of shot numbering)
+    notifs_out=156, code_done=259, builder_start=311, dashboard_start=375,
+    scrib_start=178, scrib_end=230,
 )
 
 # Animation conventions shared by Blender and the audio synth:

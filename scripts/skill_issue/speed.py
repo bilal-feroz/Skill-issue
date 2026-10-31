@@ -21,41 +21,40 @@ SEED = 7_2024  # global seed for every random decision derived here
 # (frame, value, interpolation into this key) ; "smooth" | "linear" | "step"
 SPEED_KEYS = [
     (1,   0.04, "smooth"),
-    (89,  0.05, "smooth"),
-    (92,  0.10, "step"),     # notif 1 jolt
+    (91,  0.05, "smooth"),
+    (94,  0.10, "step"),     # notification 1 jolt
     (104, 0.14, "smooth"),
-    (116, 0.20, "smooth"),
-    (140, 0.16, "smooth"),
-    (160, 0.20, "smooth"),
-    (184, 0.38, "smooth"),   # typing takes off
-    (214, 0.60, "smooth"),
-    (232, 0.72, "smooth"),
-    (248, 0.88, "smooth"),   # 16x
-    (269, 0.92, "smooth"),
-    (273, 0.00, "linear"),   # AI CAN NOW DO THAT FOR YOU -> dead stop
-    (312, 0.00, "linear"),
-    (314, 0.97, "step"),     # NEW MODEL. BETTER AT EVERYTHING.
-    (330, 1.00, "smooth"),
-    (332, 0.45, "linear"),   # the idea
-    (340, 0.80, "smooth"),   # frantic build
-    (362, 0.82, "smooth"),
-    (377, 0.70, "smooth"),   # BUTTON
-    (388, 0.18, "smooth"),   # relief
-    (410, 0.10, "smooth"),
-    (418, 0.30, "smooth"),   # scrolling
-    (434, 0.55, "smooth"),
-    (466, 0.40, "smooth"),
-    (490, 0.15, "smooth"),
-    (492, 0.00, "step"),     # ROADMAP OBSOLETE -> silence
-    (516, 0.00, "linear"),
-    (520, 0.02, "smooth"),
-    (579, 0.03, "smooth"),
-    (600, 0.20, "smooth"),   # walls down, the system is visible
-    (630, 0.32, "smooth"),
-    (639, 0.36, "smooth"),
-    (643, 1.00, "linear"),   # 10X FASTER
-    (672, 1.00, "smooth"),
-    (673, 0.00, "step"),     # black
+    (115, 0.20, "smooth"),
+    (138, 0.16, "smooth"),
+    (156, 0.20, "smooth"),
+    (176, 0.40, "smooth"),   # typing takes off
+    (208, 0.62, "smooth"),
+    (223, 0.86, "smooth"),   # 16x
+    (241, 0.92, "smooth"),
+    (245, 0.00, "linear"),   # AI CAN NOW DO THAT FOR YOU -> dead stop
+    (284, 0.00, "linear"),
+    (286, 0.97, "step"),     # NEW MODEL. BETTER AT EVERYTHING.
+    (310, 1.00, "smooth"),
+    (312, 0.45, "linear"),   # the idea
+    (320, 0.80, "smooth"),   # frantic build
+    (348, 0.82, "smooth"),
+    (363, 0.70, "smooth"),   # BUTTON
+    (377, 0.18, "smooth"),   # relief
+    (399, 0.10, "smooth"),
+    (420, 0.30, "smooth"),   # scrolling
+    (432, 0.50, "smooth"),
+    (468, 0.40, "smooth"),
+    (493, 0.15, "smooth"),
+    (495, 0.00, "step"),     # ROADMAP OBSOLETE -> silence
+    (530, 0.00, "linear"),
+    (534, 0.02, "smooth"),
+    (586, 0.03, "smooth"),
+    (606, 0.20, "smooth"),   # walls down, the system is visible
+    (632, 0.32, "smooth"),
+    (644, 0.36, "smooth"),
+    (648, 1.00, "linear"),   # 10X FASTER
+    (674, 1.00, "smooth"),
+    (675, 0.00, "step"),     # black
     (720, 0.00, "linear"),
 ]
 
@@ -174,11 +173,11 @@ def compute():
         ch["finish_gap"].append(gap)
 
         # -- Spawners: accumulators turn speed into discrete events ----------
-        if _in(f, 186, 268):
+        if _in(f, E["typing_start"] + 22, E["notif_do_that"] - 2):
             acc["books"] += 7.0 * (s ** 1.5) / T.FPS
             acc["cups"] += 4.2 * (s ** 2.0) / T.FPS
             acc["papers"] += 2.6 * (s ** 1.2) / T.FPS
-        if _in(f, 163, 268):
+        if _in(f, E["typing_start"] + 2, E["notif_do_that"] - 2):
             acc["toasts"] += 5.0 * (s ** 1.3) / T.FPS
         for kind in ("books", "cups", "papers", "toasts"):
             while acc[kind] >= 1.0:

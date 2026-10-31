@@ -38,8 +38,8 @@ def clamp(x, a=0.0, b=1.0):
 
 
 def win(f, a, b, ramp=3):
-    """1 inside [a, b] with soft ramps of `ramp` frames, else 0."""
-    if f < a - ramp or f > b + ramp:
+    """1 inside [a, b] with soft ramps of `ramp` frames, else 0 (0 for an empty window)."""
+    if b < a or f < a - ramp or f > b + ramp:
         return 0.0
     if f < a:
         return U.ease((f - (a - ramp)) / ramp, "smooth")
@@ -233,6 +233,8 @@ class Hero:
         self.W["door_handle"] = mw(R.door_handle).translation
         self.W["floor_scroll"] = V((-0.6, 0.3, 0.0))
         self.W["lid_top"] = (mw(R.laptop_hinge) @ V((0, 0.0, 0.215)))
+        self.W["laptop_M"] = mw(R.laptop)
+        self.W["printer_slot"] = mw(self.mc.printer) @ V((0, -0.045, 0.03))
         self.W["finish"] = V((0, 80, 6))
         self.W["display"] = V((-15.0, 24, 10.5))
         self.cam_pos = {}     # filled by cameras (for looking at the audience)
@@ -336,7 +338,7 @@ class Hero:
         D = self.spine_cache(f)
         Hw = self.path.matrix(f) @ D["head"] @ self.solver.Rinv["head"]
         R3 = Hw.to_3x3()
-        mouth = Hw @ V((0.0, -0.165, 1.462))
+        mouth = Hw @ V((0.0, -0.150, 1.479))
         fwd = (R3 @ V((0, -1, 0))).normalized()
         up = (R3 @ V((0, 0, 1))).normalized()
         left = (R3 @ V((1, 0, 0))).normalized()
@@ -344,7 +346,7 @@ class Hero:
         x = (left - z * left.dot(z)).normalized()
         y = z.cross(x)
         Mm = Matrix((x, y, z)).transposed().to_4x4()
-        Mm.translation = mouth + fwd * 0.06 - up * 0.075
+        Mm.translation = mouth + fwd * 0.07 - up * 0.08
         l0, q0, _ = rest.decompose()
         l1, q1, _ = Mm.decompose()
         out = q0.slerp(q1, U.ease(b, "smooth")).to_matrix().to_4x4()
@@ -431,8 +433,11 @@ class Hero:
         hangR = self.char_hand("R", (-0.25, -0.02, 0.80), (-0.02, -0.15, -1), (1, 0, 0), V((-0.5, 0.6, 1.0)))
         upL = self.char_hand("L", (0.16, 0.05, 1.98), (-0.2, 0.1, 1), (-0.3, -1, 0), V((1, 0.2, 1.4)))
         upR = self.char_hand("R", (-0.16, 0.05, 1.98), (0.2, 0.1, 1), (0.3, -1, 0), V((-1, 0.2, 1.4)))
-        L.key(e["stand_end"], hangL, "smooth").key(e["stretch_start"] + 3, upL, "smooth").key(e["stretch_end"] - 2, upL).key(e["stretch_end"] + 4, hangL, "smooth")
-        R.key(e["stand_end"], hangR, "smooth").key(e["stretch_start"] + 3, upR, "smooth").key(e["stretch_end"] - 2, upR).key(e["stretch_end"] + 4, hangR, "smooth")
+        L.key(e["stand_end"], hangL, "smooth")
+        R.key(e["stand_end"], hangR, "smooth")
+        if e["stretch_end"] - e["stretch_start"] >= 8:          # optional stretch beat
+            L.key(e["stretch_start"] + 3, upL, "smooth").key(e["stretch_end"] - 2, upL).key(e["stretch_end"] + 4, hangL, "smooth")
+            R.key(e["stretch_start"] + 3, upR, "smooth").key(e["stretch_end"] - 2, upR).key(e["stretch_end"] + 4, hangR, "smooth")
 
         def swing(side, base, k):
             def spec(f):
@@ -613,7 +618,7 @@ class Hero:
         idea = win(f, e["idea"], e["idea"] + 5, 2)
         head[0] -= 0.12 * idea
         scr = win(f, e["scream_start"], e["scream_end"], 2)
-        head[0] -= 0.25 * scr
+        head[0] -= 0.10 * scr
         head[2] += 0.04 * math.sin(f * 2.7) * scr
         proud = win(f, e["proud_start"], e["display_flip"], 3)
         head[0] -= 0.15 * proud
@@ -762,7 +767,7 @@ class Hero:
             sy = (f - e["whisper_start"]) / 3.2
             m["O"] = max(m["O"], 0.35 * max(0.0, math.sin(sy * math.pi)))
         # eyelids: base openness falls with stress; shocks open wide; blinks
-        open_ = 0.98 - 0.24 * st
+        open_ = 1.02 - 0.14 * st        # stress tires the eyes, never to a sleepy 14-degree lid
         wide = max(win(f, e["notif3"], e["notif3"] + 6, 2), win(f, e["notif_better"], e["scream_end"], 2),
                    win(f, e["idea"], e["idea"] + 6, 2), win(f, e["walls_fall_start"], e["realize"], 3),
                    win(f, e["display_flip"], e["yank"] + 4, 2), win(f, e["notif_obsolete"], e["notif_obsolete"] + 3, 1))
@@ -771,7 +776,7 @@ class Hero:
                     win(f, e["breath"] + 1, e["breath"] + 4, 1))
         open_ *= (1 - 0.92 * bliss)
         empty = win(f, e["empty_face"], e["close_laptop"] - 3, 3)
-        open_ = open_ * (1 - empty) + 0.55 * empty
+        open_ = open_ * (1 - empty) + 0.92 * empty          # a blank, wide-eyed stare
         proud = win(f, e["proud_start"], e["display_flip"], 2)
         open_ = open_ * (1 - proud) + 0.6 * proud
         for bf in (20, 63, 101, 150, 196, 236, 288, 344, 384, 430, 468, 528, 556, 604, 625, 658):
@@ -1188,14 +1193,91 @@ def build_scroll(ctx):
     L = 0.0
     for f in FRAMES:
         if a <= f:
-            v = (0.6 + 9.0 * ch("speed", f) + 30.0 * clamp((f - a) / (b - a)) ** 2) / T.FPS * 2.2
-            L = min(total, L + v) if f <= b + 30 else L
+            # S19: slow, so the header rolls over the desk edge and hangs there long enough
+            # to read; S19b: it pours
+            pour = E["print_start"] + 20
+            if f <= pour:
+                v = 0.02 + 0.04 * clamp((f - a) / 6.0)
+            elif f <= b:
+                v = 0.06 + 0.69 * clamp((f - pour) / (b - pour)) ** 1.6
+            else:
+                v = 0.75
+            L = min(total, L + v)
         vals.append(L)
     from .hall import input_id
     ident = input_id(mod, "Printed Length")
     U.bake(ob, f'modifiers["Grow"].properties.inputs.{ident}.value', 0, FRAMES, vals)
+    # printed roadmap texture: the header rides on the paper's leading edge
+    pm = _roadmap_print_material(ctx)
+    if pm is not None:
+        ob.data.materials.clear()
+        ob.data.materials.append(pm)
+        U.bake(pm.node_tree, 'nodes["PrintedLength"].outputs[0].default_value', 0, FRAMES, vals)
     ctx.scroll = ob
     return ob
+
+
+def _roadmap_print_material(ctx, head_len=0.63, tile_len=0.84):
+    import os
+    hp = os.path.join(ctx.screen_dir, "roadmap_paper_head.png")
+    tp = os.path.join(ctx.screen_dir, "roadmap_paper_tile.png")
+    if not (os.path.exists(hp) and os.path.exists(tp)):
+        return None
+    from . import materials as M_
+    m = bpy.data.materials.new("MAT_RoadmapPrint")
+    m.use_nodes = True
+    nb = M_.NB(m.node_tree)
+    nb.nodes.clear()
+    tc = nb.n("ShaderNodeTexCoord", (-1400, 0))
+    sep = nb.n("ShaderNodeSeparateXYZ", (-1200, 0))
+    nb.l(tc.outputs["UV"], sep.inputs[0])
+    pl = nb.n("ShaderNodeValue", (-1200, -250))
+    pl.name = "PrintedLength"
+    up = nb.n("ShaderNodeMath", (-1000, -100), _operation='SUBTRACT')   # distance from the tip
+    nb.l(pl.outputs[0], up.inputs[0])
+    nb.l(sep.outputs["X"], up.inputs[1])
+    # printed side up, text 'up' pointing back toward the slot (flipped along the paper only):
+    # upright for anyone in front of the machine, and upright again where it hangs off the desk
+    across = nb.n("ShaderNodeMath", (-1000, 150), _operation='SUBTRACT')
+    across.inputs[0].default_value = 1.0
+    nb.l(sep.outputs["Y"], across.inputs[1])
+    hv = nb.n("ShaderNodeMath", (-800, -50), _operation='MULTIPLY_ADD')
+    nb.l(up.outputs[0], hv.inputs[0])
+    hv.inputs[1].default_value = 1.0 / head_len
+    hv.inputs[2].default_value = 0.0
+    huv = nb.n("ShaderNodeCombineXYZ", (-600, 0))
+    nb.l(across.outputs[0], huv.inputs[0])
+    nb.l(hv.outputs[0], huv.inputs[1])
+    tv0 = nb.n("ShaderNodeMath", (-800, -300), _operation='MULTIPLY_ADD')
+    nb.l(up.outputs[0], tv0.inputs[0])
+    tv0.inputs[1].default_value = 1.0 / tile_len
+    tv0.inputs[2].default_value = -head_len / tile_len
+    tv = nb.n("ShaderNodeMath", (-650, -300), _operation='FRACT')
+    nb.l(tv0.outputs[0], tv.inputs[0])
+    tuv = nb.n("ShaderNodeCombineXYZ", (-500, -250))
+    nb.l(across.outputs[0], tuv.inputs[0])
+    nb.l(tv.outputs[0], tuv.inputs[1])
+    th = nb.n("ShaderNodeTexImage", (-350, 100))
+    th.image = bpy.data.images.load(hp, check_existing=True)
+    th.extension = 'EXTEND'
+    nb.l(huv.outputs[0], th.inputs[0])
+    tt = nb.n("ShaderNodeTexImage", (-350, -200))
+    tt.image = bpy.data.images.load(tp, check_existing=True)
+    tt.extension = 'REPEAT'
+    nb.l(tuv.outputs[0], tt.inputs[0])
+    is_head = nb.n("ShaderNodeMath", (-350, 300), _operation='LESS_THAN')
+    nb.l(up.outputs[0], is_head.inputs[0])
+    is_head.inputs[1].default_value = head_len
+    mix = nb.n("ShaderNodeMix", (-100, 0), _data_type='RGBA')
+    nb.l(is_head.outputs[0], mix.inputs["Factor"])
+    nb.l(tt.outputs["Color"], mix.inputs[6])
+    nb.l(th.outputs["Color"], mix.inputs[7])
+    p = nb.n("ShaderNodeBsdfPrincipled", (150, 0))
+    p.inputs["Roughness"].default_value = 0.55
+    nb.l(mix.outputs[2], p.inputs["Base Color"])
+    out = nb.n("ShaderNodeOutputMaterial", (400, 0))
+    nb.l(p.outputs[0], out.inputs[0])
+    return m
 
 
 # ---------------------------------------------------------------------------
@@ -1217,7 +1299,7 @@ def bake_lights(ctx):
         w_cy = win(f, e["build_start"], e["sip2_start"], 3)
         c = c.lerp(red, w_red).lerp(cyan, w_cy * 0.6)
         closed = clamp((f - e["close_laptop"] - 1) / 5.0) * (1 - clamp((f - e["yank"] - 5) / 2.0))
-        lap_e.append(5.0 * (1 + 1.4 * pulse) * flick * (1 - closed) + 6.0 * w_red)
+        lap_e.append(3.4 * (1 + 1.4 * pulse) * flick * (1 - closed) + 6.0 * w_red)
         lap_c.append(tuple(c))
         mc = cool.lerp(red, win(f, e["notif_better"], e["scream_end"], 1)).lerp(cyan, win(f, e["build_start"], e["print_end"], 4) * 0.7)
         mon_e.append(7.0 * (1 + 0.6 * pulse) * flick * (0.4 if f >= e["walls_land"] else 1.0))
@@ -1232,6 +1314,9 @@ def bake_lights(ctx):
     # the idea: lamp flares like a lightbulb moment
     lamp = [60.0 * (1 + 1.3 * win(f, e["idea"], e["idea"] + 3, 1)) * (1 - 0.0) for f in FRAMES]
     U.bake(Lg.lamp_spot.data, "energy", 0, FRAMES, lamp)
+    # the face key leaves with him when he walks away from the desk
+    U.bake(Lg.face_key.data, "energy", 0, FRAMES, [13.0 * (1 - win(f, e["walk_start"], e["yank"], 4)) for f in FRAMES])
+    U.bake(Lg.paper.data, "energy", 0, FRAMES, [55.0 * win(f, e["print_start"], e["print_end"] + 2, 3) for f in FRAMES])
     # hall lights come on as the walls fall (no leaks before that)
     hall_on = [U.ease(clamp((f - e["walls_fall_start"]) / 10.0)) for f in FRAMES]
     for lt in Lg.hall:
@@ -1242,6 +1327,8 @@ def bake_lights(ctx):
     U.bake(gate.data, "energy", 0, FRAMES, [2.5e6 * h for h in hall_on])
     door = [U.ease(clamp((f - e["walk_start"]) / 8.0)) * (1 - U.ease(clamp((f - e["walls_land"]) / 6.0))) for f in FRAMES]
     U.bake(Lg.door_leak.data, "energy", 0, FRAMES, [40.0 * d for d in door])
+    U.bake(Lg.whisper.data, "energy", 0, FRAMES,
+           [14.0 * win(f, e["breath"] - 4, e["walls_fall_start"] + 2, 4) for f in FRAMES])
     # room lights dim to nothing during the pullback (they're tiny in frame anyway)
     # window 'dawn' follows the racing clock
     city = bpy.data.materials["MAT_CityBacklight"]
@@ -1293,7 +1380,8 @@ def bake_environment(ctx, hero):
     comp = ctx.scene.compositing_node_group
     fog = [0.0 if f < e["walls_fall_start"] else (0.85 if f < e["black"] else 0.0) for f in FRAMES]
     U.bake(comp, 'nodes["FogAmount"].outputs[0].default_value', 0, FRAMES, fog, 'CONSTANT')
-    shutter = [0.06 if E["pullback_start"] <= f < E["black"] else 0.42 for f in FRAMES]
+    shutter = [0.06 if E["pullback_start"] <= f < E["black"] else (0.22 if E["print_start"] <= f <= E["print_end"] + 2 else 0.42)
+               for f in FRAMES]
     U.bake(ctx.scene, "render.motion_blur_shutter", 0, FRAMES, shutter, 'CONSTANT')
     mist = U.Track().key(1, 260.0).key(e["pullback_start"], 260.0).key(e["black"] - 1, 3800.0, "in")
     U.bake(ctx.scene.world, "mist_settings.depth", 0, FRAMES, [mist(f) for f in FRAMES])

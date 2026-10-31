@@ -1916,7 +1916,8 @@ def score(mx, voice_src, voice_meta):
     mx.add("sfx", sfx_cloth(r, F(E["stand_end"]) - F(E["stand_start"]), 0.8), F(E["stand_start"]), -28, 0.0, {"sfx>room": -10})
     mx.add("sfx", sfx_chair_roll(r), F(E["chair_roll"]), -15, -0.3, {"sfx>room": -9})
     cue(E["chair_roll"], "sfx", "Chair creak + caster roll", "Band-passed pink noise with wheel-bump AM, brown rumble, saw creak")
-    mx.add("sfx", sfx_cloth(r, F(E["stretch_end"]) - F(E["stretch_start"]), 1.0), F(E["stretch_start"]), -24, 0.1, {"sfx>room": -10})
+    if E["stretch_end"] - E["stretch_start"] >= 8:          # the stretch is optional in the cut
+        mx.add("sfx", sfx_cloth(r, F(E["stretch_end"]) - F(E["stretch_start"]), 1.0), F(E["stretch_start"]), -24, 0.1, {"sfx>room": -10})
     cue(E["stand_start"], "sfx", f"Cloth: standing (to {E['stand_end']}) and hoodie stretch ({E['stretch_start']}-{E['stretch_end']})",
         "Band-passed noise with slow swell + sparse crackle grains")
     for i, f in enumerate(E["steps"]):

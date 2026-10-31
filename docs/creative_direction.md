@@ -24,49 +24,56 @@ visual and work without dialogue. Text only appears where the joke is the text.
 | Materials | Worn wood, paper, ceramic, fabric | Desaturated steel, rubber belts, concrete |
 | Camera | Locked-off and slow early, increasingly kinetic | Orbit reveal, then a ballistic pull-back |
 
-**Character.** A stylised student in his early twenties: oversized head, mustard hoodie with
-drawstrings, dark jeans, white sneakers, round glasses, messy dark hair. The hair gets messier,
-the eye bags darker and the eyelids heavier as the `stress` channel rises. Expression comes
-from big eyes, brows, lids, a shape-keyed mouth, head/neck posture and readable hand poses.
+**Character.** A stylised student in his early twenties, designed for appeal: a big round
+head, big brown eyes set on the head's midline, a small button nose, a short soft jaw with
+full rosy cheeks, medium round ears, and a dark swept quiff over short combed sides. He wears a
+mustard hoodie with a ribbed crew collar and drawstrings, dark jeans and white sneakers. The hair
+gets messier, the eye bags darker and the eyelids a little heavier as the `stress` channel rises.
+Expression comes from the eyes, brows, lids, a shape-keyed mouth, head and neck posture, and
+readable hand poses. (An earlier pass followed a long-nosed caricature reference; the director
+replaced it with this friendlier design.)
 
 **The window is fake.** It's a backlit city panel, and it brightens to a cold dawn as the clock
 races. In Act IV it turns out to be a light box on the back of a stage flat.
 
 ## Shot list (source of truth: `scripts/skill_issue/timeline.py`)
 
-29 shots, 720 frames, 24 fps. Times are when each shot starts.
+31 shots, 720 frames, 24 fps. Times are when each shot starts. Act III beats are
+held for 0.8–1.6 s each so the machine, the roadmap and the printout read on first viewing.
 
 | Shot | Frames | Starts | Beat |
 |---|---|---|---|
-| S01 | 1–44 | 0.00 s | Wide establishing push-in. He writes **LEARN AI.** |
-| S02 | 45–68 | 1.83 s | Notebook insert, confident underline |
-| S03 | 69–92 | 2.83 s | Webcam POV: smug smile, sip of coffee. *ding* |
-| S04 | 93–122 | 3.83 s | Laptop: NEW MODEL RELEASED / NEW AGENT FRAMEWORK / NEW BENCHMARK. EVERYTHING CHANGED. |
-| S05 | 123–140 | 5.08 s | Webcam: the smile slowly dies |
-| S06 | 141–160 | 5.83 s | Notebook: **LEARN AI FASTER.** |
-| S07 | 161–184 | 6.67 s | Hands: typing starts and accelerates |
-| S08 | 185–214 | 7.67 s | Front: head snaps between screens, books stack themselves, cups multiply |
-| S09 | 215–232 | 8.92 s | The digital clock races |
-| S10 | 233–256 | 9.67 s | Laptop: tutorial at 2x → 4x → 16x |
-| S11 | 257–268 | 10.67 s | Webcam: furious, understanding-nothing nodding |
-| S12 | 269–284 | 11.17 s | Laptop: **AI CAN NOW DO THAT FOR YOU.** |
-| S12b | 285–312 | 11.83 s | Code. Notification. Code. Hold (dead silence) |
-| S13 | 313–330 | 13.00 s | **NEW MODEL. BETTER AT EVERYTHING.** Silent scream, crash zoom |
-| S14 | 331–362 | 13.75 s | The idea. The agent machine assembles itself on the desk |
-| S15 | 363–386 | 15.08 s | Machine wakes up: displays, cyan data tubes. He slams the BIG BUTTON |
-| S16 | 387–410 | 16.08 s | He relaxes for the first time. Sip. *Roadmap ready.* |
-| S17 | 411–434 | 17.08 s | **0 / 847 SKILLS MASTERED.** Scroll. Scroll. Scroll. |
-| S18 | 435–468 | 18.08 s | Pull back: the roadmap prints as a paper scroll that snakes out under the door |
-| S19 | 469–490 | 19.50 s | He looks at the scroll, the machine, then at us. Reaches for coffee |
-| S20 | 491–502 | 20.42 s | **NEW RELEASE. ROADMAP OBSOLETE.** |
-| S21 | 503–516 | 20.92 s | Near silence. Empty face |
-| S22 | 517–538 | 21.50 s | Closes the laptop, stands, stretches |
-| S23 | 539–576 | 22.42 s | Walks to the door. Breath. *"Finally. I'm caught up."* |
-| S24 | 577–610 | 24.00 s | He turns the handle, the walls fall flat, and the camera orbits up into an endless conveyor hall |
-| S25 | 611–632 | 25.42 s | PA: *"Congratulations. You are now an expert."* Rows of identical students behind him. Pride |
-| S26 | 633–650 | 26.33 s | Display: **NEW MODEL RELEASED. 10X FASTER.** His chair yanks him back to the desk |
-| S27 | 651–672 | 27.08 s | Ballistic pull-back: his loop is one of many identical loops |
-| S28 | 673–720 | 28.00 s | **SKILL ISSUE.** / *HUMANITY: STILL IN BETA.* |
+| S01 | 1–44 | 0.00 s | Wide push-in: he writes LEARN AI. |
+| S02 | 45–68 | 1.83 s | Notebook insert: LEARN AI. underlined |
+| S03 | 69–94 | 2.83 s | Webcam MCU: smug smile, sip. Ding. |
+| S04 | 95–126 | 3.92 s | Laptop: three notifications stack |
+| S05 | 127–138 | 5.25 s | Webcam: the smile dies |
+| S06 | 139–156 | 5.75 s | Notebook: LEARN AI FASTER. |
+| S07 | 157–176 | 6.50 s | Keyboard insert: typing accelerates |
+| S08 | 177–196 | 7.33 s | Three-quarter: head snaps, book tower, cups |
+| S08b | 197–208 | 8.17 s | The desk clock races |
+| S09 | 209–230 | 8.67 s | Laptop: tutorial 2x / 4x / 16x |
+| S10 | 231–240 | 9.58 s | Webcam: furious nodding |
+| S11 | 241–258 | 10.00 s | Laptop: AI CAN NOW DO THAT FOR YOU. |
+| S12 | 259–284 | 10.75 s | Code. Notification. Code. Hold. |
+| S13 | 285–296 | 11.83 s | Laptop: NEW MODEL. BETTER AT EVERYTHING. |
+| S14 | 297–310 | 12.33 s | Silent scream, crash zoom |
+| S15 | 311–348 | 12.92 s | The idea. The agent machine assembles itself |
+| S16 | 349–374 | 14.50 s | Machine wakes. He slams the BIG BUTTON |
+| S17 | 375–398 | 15.58 s | He finally relaxes. Sip. Chime. |
+| S18 | 399–432 | 16.58 s | ROADMAP READY -> 0 / 847 SKILLS MASTERED -> scroll |
+| S19 | 433–452 | 18.00 s | The machine prints his roadmap: the header hangs off the desk |
+| S19b | 453–470 | 18.83 s | ...and keeps printing: paper floods the room toward the door |
+| S20 | 471–492 | 19.58 s | He looks at the paper... then at us. Reaches for coffee |
+| S21 | 493–516 | 20.50 s | NEW RELEASE. ROADMAP OBSOLETE. |
+| S22 | 517–530 | 21.50 s | Silence. Empty face |
+| S23 | 531–548 | 22.08 s | Closes the laptop, stands |
+| S24 | 549–584 | 22.83 s | Walks to the door. Breath. Whisper. |
+| S25 | 585–618 | 24.33 s | Walls fall. Orbit reveal of the hall |
+| S26 | 619–638 | 25.75 s | CONGRATULATIONS. Pride. |
+| S27 | 639–654 | 26.58 s | Display: 10X FASTER. Yanked back |
+| S28 | 655–674 | 27.25 s | Impossible pull-back: the loop |
+| S29 | 675–720 | 28.08 s | SKILL ISSUE. / HUMANITY: STILL IN BETA. |
 
 ## Sound arc
 

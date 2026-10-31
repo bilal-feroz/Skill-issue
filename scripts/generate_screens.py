@@ -8,14 +8,19 @@ procedural rate from ``skill_issue.speed``; nothing depends on wall-clock time.
 
     python scripts/generate_screens.py
     python scripts/generate_screens.py --only laptop,monitor --frames 230-320
+    python scripts/generate_screens.py --only paper,keyboard  # static textures only
     python scripts/generate_screens.py --contact out.jpg     # key-frame sheet
 
-Outputs (named by FILM frame number):
+Outputs (sequences are named by FILM frame number):
     assets/screens/laptop/laptop_####.jpg      1280x800   0001-0720
     assets/screens/monitor/monitor_####.jpg    1600x900   0001-0720
-    assets/screens/notebook/notebook_####.png  1024x1024  0001-0232
+    assets/screens/notebook/notebook_####.png  1024x1024  0001-E['scrib_end']
     assets/screens/display/display_####.jpg    1920x640   0560-0720
     assets/screens/crowd_atlas.png             2048x1280  (4x4 tiles)
+    assets/screens/roadmap_paper_head.png      512x1536   printout start (header + items 001..)
+    assets/screens/roadmap_paper_tile.png      512x2048   printout body, tiles vertically
+    assets/screens/keyboard.png                2048x780   laptop keyboard albedo
+    assets/screens/keyboard_glow.png           2048x780   legends + backlight edge mask (emission)
 
 System Python 3.11 + Pillow + numpy.  Fonts: assets/fonts/Inter.woff2 and
 assets/fonts/DejaVuSansMono.woff2 only.
@@ -42,16 +47,13 @@ from skill_issue import speed as S  # noqa: E402
 from skill_issue import timeline as T  # noqa: E402
 
 E = T.E
-SHOT = {sh["id"]: sh for sh in T.SHOTS}
-# Derived beats (everything comes from timeline.py; nothing is hard-coded here)
+# Every beat comes from timeline.E (never from shot IDs, which change meaning on
+# a retime).  Screen phases use the explicit E keys notifs_out, code_done,
+# builder_start, dashboard_start, print_start, scrib_start and scrib_end; the
+# few derived beats below are offsets from E.
 B = dict(
-    notifs_out=SHOT["S06"]["end"],            # the three big cards leave by the end of S06
     banner=E["snaps"][1] + 1,                 # 'this lecture is outdated' banner
-    code_done=SHOT["S12"]["start"],           # monitor: finished code (shot cut)
-    builder_start=SHOT["S14"]["start"],       # laptop: agent builder
-    dashboard_start=SHOT["S16"]["start"],     # laptop: calm dashboard
-    scrib_start=SHOT["S08"]["start"] + 1,     # notebook: frantic scribbles
-    scrib_end=SHOT["S09"]["end"],
+    reopen=E["yank"] + 5,                     # laptop lid back open: frantic screen until E['black']
     screensaver=E["close_laptop"] + 3,        # monitor: KEEP UP. screensaver
 )
 FONT_DIR = REPO / "assets" / "fonts"
@@ -60,12 +62,13 @@ MONO_PATH = FONT_DIR / "DejaVuSansMono.woff2"
 OUT_DIR = REPO / "assets" / "screens"
 JPEG_Q = 88
 
+DISPLAY_FIRST = 560     # file-range contract with hall.py (sequence first=560); content is E-based
 SEQUENCES = {
     # name: (first frame, last frame, (w, h), extension)
     "laptop": (T.FRAME_START, T.FRAME_END, (1280, 800), "jpg"),
     "monitor": (T.FRAME_START, T.FRAME_END, (1600, 900), "jpg"),
-    "notebook": (T.FRAME_START, B["scrib_end"], (1024, 1024), "png"),   # Blender holds the last frame
-    "display": (560, T.FRAME_END, (1920, 640), "jpg"),
+    "notebook": (T.FRAME_START, E["scrib_end"], (1024, 1024), "png"),   # Blender holds the last frame
+    "display": (DISPLAY_FIRST, T.FRAME_END, (1920, 640), "jpg"),
 }
 
 # =============================================================================
@@ -326,12 +329,6 @@ def vgrad(w, h, c0, c1):
     t = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
     arr = np.array(c0, np.float32) * (1 - t) + np.array(c1, np.float32) * t
     return Image.fromarray(np.broadcast_to(arr, (h, w, 3)).astype(np.uint8))
-
-
-def paste_grad_rr(img, box, r, c0, c1, alpha=1.0):
-    x0, y0, x1, y1 = ibox(box)
-    g = vgrad(x1 - x0, y1 - y0, c0, c1)
-    img.paste(g, (x0, y0), scale_mask(rr_mask(x1 - x0, y1 - y0, r), alpha))
 
 
 def aa(img, color, fn, box=None, ss=3, alpha=1.0):
@@ -657,14 +654,109 @@ def write_frame(path, data, seen):
 
 
 # =============================================================================
+# DESIGN LANGUAGE  (laptop + monitor)
+# =============================================================================
+# The screens are filmed small and at an angle, so every state has ONE hero
+# message with big high-contrast type, a single accent colour and a pushed-back
+# (blurred, darkened) UI behind it.  Cards share one radius / shadow / padding
+# vocabulary and every entrance is the same eased slide + fade.
+INFO, ALERT, AGENT, WARN = BLUE, RED, CYAN, AMBER
+R_HERO, R_CARD, R_CHIP = 30, 22, 14
+ENTER = 6                                   # frames for every eased slide + fade
+
+
+def enter_k(age, n=ENTER):
+    """Eased 0..1 entrance progress for an element born `age` frames ago."""
+    return ease_out((age + 1) / n)
+
+
+def exit_k(f, end, n=ENTER):
+    """Eased 0..1 exit progress for an element that must be gone by frame `end`."""
+    return ease_in((f - (end - n)) / n)
+
+
+def card(w, h, top, bot, accent=None, r=R_CARD, border=0.55, bw=2.0, blur=24, op=0.6, dy=12):
+    """RGBA card: gradient body, soft drop shadow, thin accent border. Returns (im, pad)."""
+    w, h = int(w), int(h)
+    sm, spad = _shadow(w, h, r, blur)
+    pad = spad + dy
+    im = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
+    sh.putalpha(scale_mask(sm, op))
+    im.alpha_composite(sh, (pad - spad, pad - spad + dy))
+    body = vgrad(w, h, top, bot).convert("RGBA")
+    body.putalpha(rr_mask(w, h, r))
+    im.alpha_composite(body, (pad, pad))
+    if accent is not None and border > 0:
+        ring = Image.new("RGBA", (w, h), tuple(accent[:3]) + (0,))
+        ring.putalpha(scale_mask(rr_ring(w, h, r, bw), border))
+        im.alpha_composite(ring, (pad, pad))
+    return im, pad
+
+
+def icon_layer(name, size, color):
+    ic = Image.new("RGBA", (int(size), int(size)), tuple(color[:3]) + (255,))
+    ic.putalpha(icon_mask(name, int(size)))
+    return ic
+
+
+def icon_tile(im, x, y, size, accent, name, fg=WHITE):
+    t = Image.new("RGBA", (int(size), int(size)), tuple(accent[:3]) + (255,))
+    t.putalpha(rr_mask(int(size), int(size), size * 0.26))
+    im.alpha_composite(t, (int(x), int(y)))
+    s = int(size * 0.6)
+    im.alpha_composite(icon_layer(name, s, fg), (int(x + (size - s) / 2), int(y + (size - s) / 2)))
+
+
+def focus(img, k, blur=10, keep=0.4):
+    """Push the UI behind a hero card back (blur + darken); k = 0..1."""
+    if k <= 0.004:
+        return img
+    back = dim(img.filter(ImageFilter.GaussianBlur(blur)), keep)
+    return Image.blend(img, back, clamp(k))
+
+
+def place_c(img, layer, cx, cy, k=1.0, dx=0.0, dy=0.0, scale0=1.0, opacity=1.0, scale=1.0):
+    """Paste a symmetric-padded card centred on (cx, cy) with an eased slide + fade + settle."""
+    op = opacity * min(1.0, k * 1.3)
+    if op <= 0.003:
+        return
+    sc = lerp(scale0, 1.0, k) * scale
+    if abs(sc - 1.0) > 1e-3:
+        layer = layer.resize((max(1, round(layer.width * sc)), max(1, round(layer.height * sc))), Image.BICUBIC)
+    paste_rgba(img, layer, cx - layer.width / 2 + (1 - k) * dx, cy - layer.height / 2 + (1 - k) * dy, opacity=op)
+
+
+def fit_lines(lines, max_w, size, weight=820, min_size=16):
+    size = int(size)
+    while size > min_size and max(F(size, weight).getlength(ln) for ln in lines) > max_w:
+        size -= 1
+    return F(size, weight)
+
+
+def draw_cursor(img, x, y, sc=1.7):
+    """Classic arrow pointer, tip at (x, y), with a soft shadow."""
+    base = [(0, 0), (0, 30), (8, 23), (14, 36), (19, 34), (13, 21), (23, 21)]
+    pts = [(x + px * sc, y + py * sc) for px, py in base]
+    box = (x - 12, y - 12, x + 26 * sc + 16, y + 38 * sc + 18)
+    sh = [(px + 3, py + 5) for px, py in pts]
+    aa(img, BLACK, lambda dd, P, ss: dd.polygon([P(*p) for p in sh], fill=255), box=box, alpha=0.35)
+    aa(img, BLACK, lambda dd, P, ss: dd.polygon([P(*p) for p in pts], fill=255, outline=255, width=int(3.2 * ss)), box=box)
+    aa(img, WHITE, lambda dd, P, ss: dd.polygon([P(*p) for p in pts], fill=255), box=box)
+
+
+# =============================================================================
 # LAPTOP  (1280 x 800)
 # =============================================================================
 LW, LH = 1280, 800
-WIN = (16, 40, 1264, 788)
-TAB_Y = (40, 78)
-TOOL_Y = (78, 114)
-SIDEBAR_X1 = 300
-PLAYER = (320, 130, 1244, 650)          # 924 x 520, 16:9
+LSC = 1.2                                   # menu-bar scale on the laptop
+LMENU = int(30 * LSC)
+WIN = (16, LMENU + 10, 1264, 788)
+TAB_Y = (WIN[1], WIN[1] + 40)
+TOOL_Y = (TAB_Y[1], TAB_Y[1] + 42)
+SIDEBAR_X1 = 318
+SB_ROW0, SB_ROWH, SB_ROWS = TOOL_Y[1] + 50, 58, 9
+PLAYER = (338, TOOL_Y[1] + 18, 1244, TOOL_Y[1] + 18 + 510)       # 906 x 510, 16:9
 LECTURES = ["What is a neural network?", "Gradient descent", "Backpropagation", "Overfitting",
             "Convolutional nets", "Sequence models", "Attention", "Transformers", "Fine-tuning",
             "Reinforcement learning", "Agents", "What's next?"]
@@ -693,7 +785,7 @@ def nn_layout(box, layers=(3, 4, 2)):
 
 def course_slide_box():
     px0, py0, px1, py1 = PLAYER
-    return (px0 + 420, py0 + 150, px1 - 110, py1 - 130)
+    return (px0 + 470, py0 + 170, px1 - 90, py1 - 150)
 
 
 @lru_cache(maxsize=1)
@@ -701,81 +793,73 @@ def course_base():
     img = wallpaper(LW, LH, 0).copy()
     d = ImageDraw.Draw(img)
     x0, y0, x1, y1 = WIN
-    drop_shadow(img, WIN, 12, blur=20, opacity=0.6, dy=10)
-    fill_rr(img, WIN, 12, (18, 20, 25))
-    # tab strip + toolbar
-    fill_rect(img, (x0 + 1, TAB_Y[0] + 6, x1 - 1, TAB_Y[1]), (13, 14, 18))
-    fill_rr(img, (x0, y0, x1, y0 + 24), 12, (13, 14, 18))
+    drop_shadow(img, WIN, 14, blur=20, opacity=0.6, dy=10)
+    fill_rr(img, WIN, 14, (18, 20, 25))
+    fill_rr(img, (x0, y0, x1, TAB_Y[1] + 14), 14, (13, 14, 18))
     fill_rect(img, (x0 + 1, TOOL_Y[0], x1 - 1, TOOL_Y[1]), (28, 31, 38))
     fill_rect(img, (x0 + 1, TOOL_Y[1] - 1, x1 - 1, TOOL_Y[1]), LINE)
-    # window controls (generic)
-    for i, c in enumerate(((72, 76, 88), (72, 76, 88), (72, 76, 88))):
-        fill_circle(img, x1 - 22 - i * 22, (TAB_Y[0] + TAB_Y[1]) / 2 + 2, 11, c)
-    # toolbar: nav + address
+    for i in range(3):
+        fill_circle(img, x1 - 24 - i * 24, (TAB_Y[0] + TAB_Y[1]) / 2 + 2, 12, (72, 76, 88))
     ty = (TOOL_Y[0] + TOOL_Y[1]) / 2
     for i, ch in enumerate(("‹", "›", "↻")):
-        d.text((x0 + 26 + i * 30, ty), ch, font=F(22, 500), fill=TXT3, anchor="mm")
-    fill_rr(img, (x0 + 110, TOOL_Y[0] + 6, x1 - 120, TOOL_Y[1] - 6), 15, (17, 19, 24))
-    icon(img, "lock", x0 + 124, ty - 7, 14, TXT3)
-    d.text((x0 + 146, ty), "skillqueue.app/ml-101/lecture-1", font=F(15, 450), fill=TXT2, anchor="lm")
-    # content background
-    fill_rect(img, (x0 + 1, TOOL_Y[1], x1 - 1, y1 - 12), (18, 20, 25))
-    # sidebar
-    fill_rect(img, (x0 + 1, TOOL_Y[1], SIDEBAR_X1, y1 - 12), (14, 15, 19))
-    fill_rr(img, (x0, y1 - 24, SIDEBAR_X1 + 12, y1), 12, (14, 15, 19))
+        d.text((x0 + 28 + i * 32, ty), ch, font=F(26, 500), fill=TXT3, anchor="mm")
+    fill_rr(img, (x0 + 118, TOOL_Y[0] + 6, x1 - 130, TOOL_Y[1] - 6), 15, (17, 19, 24))
+    icon(img, "lock", x0 + 134, ty - 8, 16, TXT3)
+    d.text((x0 + 160, ty), "skillqueue.app/ml-101/lecture-1", font=F(18, 500), fill=TXT2, anchor="lm")
+    fill_rect(img, (x0 + 1, TOOL_Y[1], x1 - 1, y1 - 14), (18, 20, 25))
+    # sidebar: fewer, bigger rows
+    fill_rect(img, (x0 + 1, TOOL_Y[1], SIDEBAR_X1, y1 - 14), (14, 15, 19))
+    fill_rr(img, (x0, y1 - 28, SIDEBAR_X1 + 14, y1), 14, (14, 15, 19))
     fill_rect(img, (SIDEBAR_X1, TOOL_Y[1], SIDEBAR_X1 + 1, y1), LINE)
-    tracked(d, (x0 + 22, 146), "COURSE CONTENT", F(12, 700), TXT3, 1.6)
-    for i, name in enumerate(LECTURES):
-        ry = 162 + i * 44
+    tracked(d, (x0 + 22, SB_ROW0 - 16), "COURSE CONTENT", F(15, 750), TXT3, 1.8)
+    for i in range(SB_ROWS):
+        ry = SB_ROW0 + i * SB_ROWH
+        cy = ry + SB_ROWH / 2
         if i == 0:
-            fill_rr(img, (x0 + 10, ry, SIDEBAR_X1 - 10, ry + 38), 8, (30, 38, 56))
-            fill_rr(img, (x0 + 10, ry + 6, x0 + 14, ry + 32), 2, BLUE)
-        cc = BLUE if i == 0 else (40, 44, 54)
-        fill_circle(img, x0 + 36, ry + 19, 22, cc)
-        d.text((x0 + 36, ry + 19), str(i + 1), font=F(11, 700), fill=WHITE if i == 0 else TXT2, anchor="mm")
-        fnt = F(14, 600 if i == 0 else 450)
-        d.text((x0 + 56, ry + 19), ellipsize(name, fnt, 170), font=fnt, fill=TXT if i == 0 else TXT2, anchor="lm")
-        d.text((SIDEBAR_X1 - 20, ry + 19), LECT_DUR[i], font=F(12, 450), fill=TXT3, anchor="rm")
+            fill_rr(img, (x0 + 10, ry + 4, SIDEBAR_X1 - 10, ry + SB_ROWH - 4), 10, (30, 38, 56))
+            fill_rr(img, (x0 + 10, ry + 12, x0 + 15, ry + SB_ROWH - 12), 2, BLUE)
+        fill_circle(img, x0 + 42, cy, 28, BLUE if i == 0 else (40, 44, 54))
+        d.text((x0 + 42, cy), str(i + 1), font=F(14, 750), fill=WHITE if i == 0 else TXT2, anchor="mm")
+        fnt = F(19, 650 if i == 0 else 500)
+        d.text((x0 + 66, cy), ellipsize(LECTURES[i], fnt, 168), font=fnt, fill=TXT if i == 0 else TXT2, anchor="lm")
+        d.text((SIDEBAR_X1 - 18, cy), LECT_DUR[i], font=F(15, 500), fill=TXT3, anchor="rm")
     # player frame + slide
     px0, py0, px1, py1 = PLAYER
-    fill_rr(img, PLAYER, 10, (245, 242, 235))
-    d.text((px0 + 56, py0 + 74), "What is a neural network?", font=F(44, 750), fill=(24, 27, 36), anchor="ls")
-    d.text((px0 + 58, py0 + 112), "Lecture 1 · Foundations", font=F(20, 500), fill=(110, 116, 130), anchor="ls")
-    fill_rect(img, (px0 + 58, py0 + 130, px0 + 118, py0 + 134), BLUE)
-    bullets = ["Layers of simple units", "Each connection has a weight", "Learning = adjusting weights"]
-    for i, b in enumerate(bullets):
-        by = py0 + 196 + i * 50
-        fill_circle(img, px0 + 66, by - 7, 9, BLUE)
-        d.text((px0 + 84, by), b, font=F(22, 500), fill=(52, 57, 70), anchor="ls")
+    fill_rr(img, PLAYER, 12, (245, 242, 235))
+    d.text((px0 + 52, py0 + 80), "What is a neural network?", font=F(46, 780), fill=(24, 27, 36), anchor="ls")
+    d.text((px0 + 54, py0 + 118), "Lecture 1 · Foundations", font=F(22, 500), fill=(110, 116, 130), anchor="ls")
+    fill_rect(img, (px0 + 54, py0 + 136, px0 + 118, py0 + 141), BLUE)
+    for i, b in enumerate(["Layers of simple units", "Weighted connections", "Learning = adjusting weights"]):
+        by = py0 + 210 + i * 54
+        fill_circle(img, px0 + 62, by - 8, 10, BLUE)
+        d.text((px0 + 82, by), b, font=F(24, 550), fill=(52, 57, 70), anchor="ls")
     cols, edges = nn_layout(course_slide_box())
 
     def draw_edges(dd, P, ss):
         for a, b in edges:
-            dd.line([P(*a), P(*b)], fill=255, width=int(1.6 * ss))
+            dd.line([P(*a), P(*b)], fill=255, width=int(1.8 * ss))
     aa(img, (150, 158, 175), draw_edges, box=PLAYER)
     colors = [(76, 141, 255), (124, 92, 246), (34, 197, 140)]
     for li, col in enumerate(cols):
         for (x, y) in col:
             fill_circle(img, x, y, 40, colors[li])
             fill_circle(img, x, y, 22, (255, 255, 255), 0.35)
-    labels = ["inputs", "hidden layer", "output"]
-    for li, col in enumerate(cols):
-        d.text((col[0][0], course_slide_box()[3] + 46), labels[li], font=F(17, 600), fill=(110, 116, 130), anchor="ms")
+    for li, lab in enumerate(["inputs", "hidden", "output"]):
+        d.text((cols[li][0][0], course_slide_box()[3] + 44), lab, font=F(19, 650), fill=(110, 116, 130), anchor="ms")
     # bottom control gradient
-    gh = 78
-    g = vgrad(px1 - px0, gh, (0, 0, 0), (0, 0, 0))
-    gm = Image.fromarray((np.linspace(0, 170, gh)[:, None] * np.ones((1, px1 - px0))).astype(np.uint8))
-    img.paste(g, (px0, py1 - gh), gm)
+    gh = 84
+    gm = Image.fromarray((np.linspace(0, 180, gh)[:, None] * np.ones((1, px1 - px0))).astype(np.uint8))
+    img.paste((0, 0, 0), (px0, py1 - gh, px1, py1), gm)
     # under-player info
-    d.text((px0, 694), "INTRO TO MACHINE LEARNING · Lecture 1 of 12", font=F(26, 750), fill=TXT, anchor="ls")
-    d.text((px0, 728), "Course progress", font=F(15, 500), fill=TXT2, anchor="ls")
-    fill_rr(img, (px0 + 128, 718, px0 + 368, 726), 4, (44, 48, 60))
-    fill_rr(img, (px0 + 128, 718, px0 + 128 + 240 * 0.03 + 4, 726), 4, BLUE)
-    d.text((px0 + 380, 728), "3%", font=F(15, 700), fill=TXT, anchor="ls")
+    d.text((px0, 706), "INTRO TO MACHINE LEARNING · Lecture 1 of 12", font=F(28, 780), fill=TXT, anchor="ls")
+    d.text((px0, 750), "Course progress", font=F(18, 550), fill=TXT2, anchor="ls")
+    fill_rr(img, (px0 + 156, 738, px0 + 420, 748), 5, (44, 48, 60))
+    fill_rr(img, (px0 + 156, 738, px0 + 172, 748), 5, BLUE)
+    d.text((px0 + 434, 750), "3%", font=F(18, 750), fill=TXT, anchor="ls")
     for i, lab in enumerate(("Notes", "Q&A", "Resources")):
-        bx = px1 - (2 - i) * 110
-        ring_rr(img, (bx - 100, 708, bx, 738), 8, 1.2, LINE)
-        d.text((bx - 50, 723), lab, font=F(14, 600), fill=TXT2, anchor="mm")
+        bx = px1 - (2 - i) * 124
+        ring_rr(img, (bx - 112, 726, bx, 762), 10, 1.4, LINE)
+        d.text((bx - 56, 744), lab, font=F(17, 650), fill=TXT2, anchor="mm")
     return img
 
 
@@ -801,145 +885,119 @@ def fmt_t(sec):
 
 def draw_tabs(img, n):
     d = ImageDraw.Draw(img)
-    x0, x1 = WIN[0] + 10, WIN[2] - 84
-    fill_rect(img, (WIN[0] + 1, TAB_Y[0] + 4, x1 + 8, TAB_Y[1]), (13, 14, 18))
-    tw = min(240, (x1 - x0) / n)
+    x0, x1 = WIN[0] + 12, WIN[2] - 92
+    ym = (TAB_Y[0] + TAB_Y[1]) / 2 + 3
+    fill_rect(img, (WIN[0] + 1, TAB_Y[0] + 5, x1 + 8, TAB_Y[1]), (13, 14, 18))
+    tw = min(260, (x1 - x0) / n)
     for i in range(n):
         tx0 = x0 + i * tw
-        active = i == 0
-        if active:
-            fill_rr(img, (tx0, TAB_Y[0] + 6, tx0 + tw - 2, TAB_Y[1] + 10), 9, (28, 31, 38))
+        if i == 0:
+            fill_rr(img, (tx0, TAB_Y[0] + 6, tx0 + tw - 2, TAB_Y[1] + 12), 10, (28, 31, 38))
         else:
-            if i > 0:
-                fill_rect(img, (tx0 - 1, TAB_Y[0] + 16, tx0, TAB_Y[1] - 8), (44, 48, 58))
+            fill_rect(img, (tx0 - 1, TAB_Y[0] + 15, tx0, TAB_Y[1] - 7), (44, 48, 58))
         col = [BLUE, ORANGE, RED, AMBER, VIOLET, GREEN][i % 6] if i else BLUE
-        if tw > 44:
-            fill_circle(img, tx0 + 18, (TAB_Y[0] + TAB_Y[1]) / 2 + 2, 12, col)
-        if tw > 70:
-            fnt = F(13, 500)
-            txt = ellipsize(TABS[i % len(TABS)], fnt, tw - 58)
-            d.text((tx0 + 32, (TAB_Y[0] + TAB_Y[1]) / 2 + 2), txt, font=fnt, fill=TXT if active else TXT2, anchor="lm")
-            d.text((tx0 + tw - 16, (TAB_Y[0] + TAB_Y[1]) / 2 + 2), "×", font=F(14, 400), fill=TXT3, anchor="mm")
+        if tw > 40:
+            fill_circle(img, tx0 + 19, ym, 14, col)
+        if tw > 80:
+            fnt = F(15, 550)
+            d.text((tx0 + 36, ym), ellipsize(TABS[i % len(TABS)], fnt, tw - 64), font=fnt,
+                   fill=TXT if i == 0 else TXT2, anchor="lm")
+            d.text((tx0 + tw - 16, ym), "×", font=F(16, 400), fill=TXT3, anchor="mm")
 
 
-# --- big notification cards (frames 90-160) ---------------------------------
-CARD_W = 660
+# --- Act I: the three notification cards (notif1 .. notifs_out) --------------
+NOTIF_W = 1060
+NOTIF_X = (LW - NOTIF_W) // 2
+NOTIF_TXT_W = NOTIF_W - 196
 
 
-@lru_cache(maxsize=16)
-def big_toast(text, kind):
-    accent = ORANGE if kind == "alert" else BLUE
-    f_min = F(38, 780)
-    if f_min.getlength(text) <= CARD_W - 130:
-        lines = [text]
-    elif ". " in text:
-        lines = [text.split(". ", 1)[0] + ".", text.split(". ", 1)[1]]
-    else:
-        lines = wrap(text, F(40, 780), CARD_W - 130)
-    h = 74 + 50 * len(lines)
-    pad = 40
-    im = Image.new("RGBA", (CARD_W + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(CARD_W, h, 18, 16)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.65))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 10))
-    body = Image.new("RGBA", (CARD_W, h), (30, 34, 44, 255) if kind != "alert" else (44, 30, 28, 255))
-    tint = vgrad(CARD_W, h, (36, 41, 53) if kind != "alert" else (58, 34, 28), (26, 29, 38) if kind != "alert" else (38, 26, 25))
-    body.paste(tint, (0, 0))
-    m = rr_mask(CARD_W, h, 18)
-    body.putalpha(m)
-    im.alpha_composite(body, (pad, pad))
+def notif_lines(text):
+    if ". " in text.rstrip("."):
+        a, b = text.split(". ", 1)
+        return [a + ".", b]
+    return [text]
+
+
+@lru_cache(maxsize=1)
+def notif_font():
+    lines = [ln for n in T.NOTIFICATIONS[:3] for ln in notif_lines(n["text"])]
+    return fit_lines(lines, NOTIF_TXT_W, 64, 820, 36)
+
+
+@lru_cache(maxsize=8)
+def notif_card(text, kind):
+    accent = ALERT if kind == "alert" else INFO
+    fnt = notif_font()
+    lines = notif_lines(text)
+    lh = int(fnt.size * 1.14)
+    by0 = 76 + int(fnt.size * 0.73)
+    h = by0 + lh * (len(lines) - 1) + 38
+    top, bot = ((40, 45, 58), (28, 31, 40)) if kind != "alert" else ((66, 30, 33), (44, 22, 26))
+    im, pad = card(NOTIF_W, h, top, bot, accent, r=R_CARD, border=0.75, blur=22, op=0.62, dy=12)
     d = ImageDraw.Draw(im)
-    ring = rr_ring(CARD_W, h, 18, 1.5)
-    border = Image.new("RGBA", (CARD_W, h), mix(accent, (255, 255, 255), 0.2) + (0,))
-    border.putalpha(scale_mask(ring, 0.55))
-    im.alpha_composite(border, (pad, pad))
-    # accent strip
-    strip = Image.new("RGBA", (6, h - 36), accent + (255,))
-    strip.putalpha(rr_mask(6, h - 36, 3))
-    im.alpha_composite(strip, (pad + 10, pad + 18))
-    # icon tile
-    tile = Image.new("RGBA", (64, 64), accent + (255,))
-    tile.putalpha(rr_mask(64, 64, 16))
-    im.alpha_composite(tile, (pad + 30, pad + 26))
-    ic = Image.new("RGBA", (40, 40), (255, 255, 255, 255))
-    ic.putalpha(icon_mask("warn" if kind == "alert" else "burst", 40))
-    im.alpha_composite(ic, (pad + 42, pad + 37))
-    tx = pad + 112
-    tracked(d, (tx, pad + 36), "BENCHMARKS" if kind == "alert" else "AI UPDATES", F(15, 700),
-            mix(accent, (255, 255, 255), 0.35), 1.8, anchor="ls")
-    d.text((pad + CARD_W - 22, pad + 36), "now", font=F(16, 500), fill=(150, 158, 175), anchor="rs")
+    icon_tile(im, pad + 36, pad + 32, 88, accent, "warn" if kind == "alert" else "burst")
+    tx = pad + 156
+    tracked(d, (tx, pad + 54), "BENCHMARKS" if kind == "alert" else "AI UPDATES", F(19, 800),
+            mix(accent, WHITE, 0.4), 2.2)
+    d.text((pad + NOTIF_W - 36, pad + 54), "now", font=F(20, 500), fill=(165, 172, 188), anchor="rs")
     for i, ln in enumerate(lines):
-        d.text((tx, pad + 92 + 50 * i), ln, font=fit(ln, CARD_W - 132, 42, 780, 36), fill=WHITE, anchor="ls")
+        d.text((tx, pad + by0 + i * lh), ln, font=fnt, fill=WHITE, anchor="ls")
     return im, pad, h
 
 
-def draw_big_notifs(img, f):
-    y = 46
-    for n in T.NOTIFICATIONS[:3]:
-        if f < n["frame"]:
-            break
-        im, pad, h = big_toast(n["text"], n["kind"])
-        age = f - n["frame"]
-        t = ease_out((age + 1) / 6)
-        out = ease_in((f - (B["notifs_out"] - 3)) / 4) if f >= B["notifs_out"] - 3 else 0.0
-        x = LW - 18 - CARD_W + (1 - t) * (CARD_W + 50) + out * (CARD_W + 60)
-        pop = 0.55 if age == 0 else 0.25 if age == 1 else 0.0
-        paste_rgba(img, im, x - pad, y - pad, opacity=1 - out * 0.5, pop=pop)
-        y += h + 12
+def notif_stack(img, f):
+    ns = T.NOTIFICATIONS[:3]
+    out = exit_k(f, E["notifs_out"])
+    y = LMENU + 36
+    for j, n in enumerate(ns):
+        im, pad, h = notif_card(n["text"], n["kind"])
+        if f >= n["frame"]:
+            k = enter_k(f - n["frame"])
+            older = enter_k(f - ns[j + 1]["frame"]) if j + 1 < len(ns) and f >= ns[j + 1]["frame"] else 0.0
+            x = NOTIF_X + (1 - k) * 110 + out * 160
+            op = min(1.0, k * 1.3) * (1 - out)
+            paste_rgba(img, im, x - pad, y - pad, opacity=op)
+            if older > 0:                            # older cards step back (darker, still opaque)
+                fill_rr(img, (x, y, x + NOTIF_W, y + h), R_CARD, BLACK, 0.34 * older * op)
+        y += h + 18
 
 
-# --- mini toasts (speed-spawned) --------------------------------------------
-MINI_W, MINI_H = 430, 66
+# --- Act II: speed-spawned toasts (bigger, max four on screen) ----------------
+TOAST_W, TOAST_H, TOAST_MAX = 560, 94, 4
 
 
 @lru_cache(maxsize=32)
-def mini_toast(text):
+def toast_card(text):
     kind = MINI_KIND.get(text, "release")
-    accent = {"warn": AMBER, "paper": VIOLET, "chart": GREEN}.get(kind, BLUE)
-    pad = 24
-    im = Image.new("RGBA", (MINI_W + 2 * pad, MINI_H + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(MINI_W, MINI_H, 14, 10)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.55))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 6))
-    body = Image.new("RGBA", (MINI_W, MINI_H), (29, 33, 42, 255))
-    body.putalpha(rr_mask(MINI_W, MINI_H, 14))
-    im.alpha_composite(body, (pad, pad))
-    border = Image.new("RGBA", (MINI_W, MINI_H), (70, 78, 96, 0))
-    border.putalpha(rr_ring(MINI_W, MINI_H, 14, 1.2))
-    im.alpha_composite(border, (pad, pad))
-    tile = Image.new("RGBA", (38, 38), accent + (255,))
-    tile.putalpha(rr_mask(38, 38, 10))
-    im.alpha_composite(tile, (pad + 14, pad + 14))
-    ic = Image.new("RGBA", (24, 24), (255, 255, 255, 255))
-    ic.putalpha(icon_mask({"warn": "warn", "paper": "paper", "chart": "chart"}.get(kind, "burst"), 24))
-    im.alpha_composite(ic, (pad + 21, pad + 21))
+    accent = WARN if kind == "warn" else INFO
+    im, pad = card(TOAST_W, TOAST_H, (38, 42, 54), (29, 32, 41), accent, r=18, border=0.5, bw=1.6,
+                   blur=14, op=0.55, dy=8)
+    icon_tile(im, pad + 18, pad + 17, 60, accent, {"warn": "warn", "paper": "paper", "chart": "chart"}.get(kind, "burst"))
     d = ImageDraw.Draw(im)
-    fnt = fit(text, MINI_W - 120, 24, 700, 16)
-    d.text((pad + 66, pad + MINI_H / 2 + 1), text, font=fnt, fill=WHITE, anchor="lm")
-    d.text((pad + MINI_W - 14, pad + MINI_H / 2 + 1), "now", font=F(14, 500), fill=TXT3, anchor="rm")
+    fnt = fit(text, TOAST_W - 178, 30, 760, 20)
+    d.text((pad + 96, pad + TOAST_H / 2 + 1), text, font=fnt, fill=WHITE, anchor="lm")
+    d.text((pad + TOAST_W - 20, pad + TOAST_H / 2 + 1), "now", font=F(17, 500), fill=TXT3, anchor="rm")
     return im, pad
 
 
-def draw_mini_toasts(img, f, x_right=LW - 18, y_top=44, life_base=26, fmin=0, fmax=9999):
+def draw_toasts(img, f, x_right=LW - 22, y_top=LMENU + 14, life_base=26, fmin=0, fmax=9999):
     toasts = [t for t in CH()["events"]["toasts"] if fmin <= t["frame"] <= min(f, fmax)]
     vis = []
     for t in toasts:
-        life = int(life_base - 10 * spd(t["frame"]))
+        life = int(life_base - 8 * spd(t["frame"]))
         age = f - t["frame"]
         if 0 <= age < life:
             vis.append((t, age, life))
     for t, age, life in vis:
-        newer = [u for u in vis if u[0]["frame"] > t["frame"]]
-        y = y_top + sum(ease_out((f - u[0]["frame"] + 1) / 5) for u in newer) * (MINI_H + 10)
-        text = MINI_TEXTS[t["i"] % len(MINI_TEXTS)]
-        im, pad = mini_toast(text)
-        slide = ease_out((age + 1) / 5)
-        x = x_right - MINI_W + (1 - slide) * (MINI_W + 40)
-        fade = 1 - clamp((age - (life - 4)) / 4)
-        pop = 0.5 if age == 0 else 0.2 if age == 1 else 0.0
-        paste_rgba(img, im, x - pad, y - pad, opacity=fade, pop=pop)
+        slot = sum(ease_out((f - u[0]["frame"] + 1) / 5) for u in vis if u[0]["frame"] > t["frame"])
+        if slot >= TOAST_MAX:
+            continue
+        im, pad = toast_card(MINI_TEXTS[t["i"] % len(MINI_TEXTS)])
+        k = enter_k(age, 5)
+        x = x_right - TOAST_W + (1 - k) * TOAST_W * 0.45
+        y = y_top + slot * (TOAST_H + 14)
+        fade = (1 - smooth((age - (life - 5)) / 5)) * clamp(TOAST_MAX - slot)
+        paste_rgba(img, im, x - pad, y - pad, opacity=min(1.0, k * 1.3) * fade)
 
 
 def lap_course(f):
@@ -948,18 +1006,15 @@ def lap_course(f):
     s = spd(f)
     act2 = f >= E["typing_start"]
     clutter = clamp((s - 0.2) / 0.52) if act2 else 0.0
-    # tabs multiply with speed
-    n_tabs = 1 + int(round(clutter * 11)) if act2 else 1
-    draw_tabs(img, n_tabs)
+    draw_tabs(img, 1 + int(round(clutter * 11)) if act2 else 1)
     # sidebar 'OUTDATED' tags creep in
     if act2:
-        n_tag = int(clutter * 9 + 0.3)
-        for i in range(n_tag):
-            li = [0, 3, 1, 6, 7, 2, 9, 10, 8][i]
-            ry = 162 + li * 44
-            fill_rect(img, (SIDEBAR_X1 - 100, ry + 4, SIDEBAR_X1 - 12, ry + 34), (30, 38, 56) if li == 0 else (14, 15, 19))
-            fill_rr(img, (SIDEBAR_X1 - 92, ry + 10, SIDEBAR_X1 - 14, ry + 28), 5, (74, 52, 16))
-            d.text((SIDEBAR_X1 - 53, ry + 19), "OUTDATED", font=F(10, 800), fill=AMBER, anchor="mm")
+        for i in range(int(clutter * 9 + 0.3)):
+            li = [0, 3, 1, 6, 7, 2, 8, 5, 4][i]
+            cy = SB_ROW0 + li * SB_ROWH + SB_ROWH / 2
+            fill_rect(img, (SIDEBAR_X1 - 116, cy - 18, SIDEBAR_X1 - 11, cy + 18), (30, 38, 56) if li == 0 else (14, 15, 19))
+            fill_rr(img, (SIDEBAR_X1 - 112, cy - 15, SIDEBAR_X1 - 12, cy + 15), 8, (82, 58, 14))
+            d.text((SIDEBAR_X1 - 62, cy), "OUTDATED", font=F(14, 800), fill=AMBER, anchor="mm")
     # video signal pulses
     px0, py0, px1, py1 = PLAYER
     cols, edges = nn_layout(course_slide_box())
@@ -968,50 +1023,50 @@ def lap_course(f):
         if ei % 3:
             continue
         ph = (vt * 0.45 + ei * 0.137) % 1.0
-        x, y = lerp(a[0], b[0], ph), lerp(a[1], b[1], ph)
-        fill_circle(img, x, y, 10, BLUE, 0.9 * math.sin(ph * math.pi))
-    # controls
+        fill_circle(img, lerp(a[0], b[0], ph), lerp(a[1], b[1], ph), 12, BLUE, 0.9 * math.sin(ph * math.pi))
+    # player controls
     rate = playback_rate(f)
     total = 24 * 60 + 10
-    tx0, tx1 = px0 + 20, px1 - 20
-    ty = py1 - 46
-    fill_rr(img, (tx0, ty - 2, tx1, ty + 3), 3, (255, 255, 255), 0.25)
+    tx0, tx1, ty = px0 + 22, px1 - 22, py1 - 52
+    fill_rr(img, (tx0, ty - 3, tx1, ty + 3), 3, WHITE, 0.25)
     fx = tx0 + (tx1 - tx0) * vt / total
-    fill_rr(img, (tx0, ty - 2, fx, ty + 3), 3, BLUE)
-    fill_circle(img, fx, ty + 0.5, 14, WHITE)
-    icon(img, "pause", px0 + 22, py1 - 30, 18, WHITE)
-    d.text((px0 + 56, py1 - 21), f"{fmt_t(vt)} / {fmt_t(total)}", font=F(15, 600), fill=WHITE, anchor="lm")
-    rl = (f"{rate:g}x")
-    hot = rate > 1
-    fr = F(15, 800 if hot else 600)
-    rw = fr.getlength(rl) + 18
+    fill_rr(img, (tx0, ty - 3, fx, ty + 3), 3, BLUE)
+    fill_circle(img, fx, ty, 16, WHITE)
+    icon(img, "pause", px0 + 24, py1 - 34, 20, WHITE)
+    d.text((px0 + 60, py1 - 24), f"{fmt_t(vt)} / {fmt_t(total)}", font=F(18, 650), fill=WHITE, anchor="lm")
+    rl, hot = f"{rate:g}x", rate > 1
+    fr = F(18, 800 if hot else 650)
+    rw = fr.getlength(rl) + 22
     if hot:
-        fill_rr(img, (px1 - 132 - rw, py1 - 33, px1 - 132, py1 - 9), 6, AMBER)
-    d.text((px1 - 132 - rw / 2, py1 - 21), rl, font=fr, fill=BLACK if hot else WHITE, anchor="mm")
-    d.text((px1 - 92, py1 - 21), "CC", font=F(14, 700), fill=WHITE, anchor="mm")
-    ring_rr(img, (px1 - 50, py1 - 30, px1 - 26, py1 - 12), 3, 2, WHITE)
-    # 'this course is outdated' banner
+        fill_rr(img, (px1 - 140 - rw, py1 - 38, px1 - 140, py1 - 10), 7, AMBER)
+    d.text((px1 - 140 - rw / 2, py1 - 24), rl, font=fr, fill=BLACK if hot else WHITE, anchor="mm")
+    d.text((px1 - 98, py1 - 24), "CC", font=F(16, 750), fill=WHITE, anchor="mm")
+    ring_rr(img, (px1 - 54, py1 - 34, px1 - 26, py1 - 14), 3, 2, WHITE)
+    # 'this lecture is outdated' banner slides down
     if act2 and f >= B["banner"]:
-        a = ease_out((f - B["banner"]) / 5)
-        fill_rr(img, (px0 + 16, py0 + 14, px0 + 16 + 560, py0 + 50), 8, (88, 62, 14), a)
-        icon(img, "warn", px0 + 28, py0 + 22, 20, AMBER, a)
-        d.text((px0 + 58, py0 + 32), "This lecture is 3 weeks old. Parts may be outdated.",
-               font=F(16, 650), fill=mix((88, 62, 14), (255, 226, 160), a), anchor="lm")
-    # menu bar: unread badge climbs
-    unread = 0
-    if f >= E["notif1"]:
-        unread = sum(1 for n in T.NOTIFICATIONS[:3] if f >= n["frame"])
+        k = enter_k(f - B["banner"])
+        by = py0 + 12 - (1 - k) * 40
+        fill_rr(img, (px0 + 12, by, px1 - 12, by + 84), 14, (96, 66, 10), k)
+        icon(img, "warn", px0 + 36, by + 25, 34, AMBER, k)
+        d.text((px0 + 88, by + 43), "This lecture is 3 weeks old. Parts may be outdated.",
+               font=F(26, 750), fill=mix((96, 66, 10), (255, 230, 170), k), anchor="lm")
+    # Act I notification cards: the UI behind them is pushed back
+    in_notifs = E["notif1"] <= f <= E["notifs_out"]
+    if in_notifs:
+        img = focus(img, 0.75 * enter_k(f - E["notif1"]) * (1 - exit_k(f, E["notifs_out"])), blur=12, keep=0.36)
+    unread = sum(1 for n in T.NOTIFICATIONS[:3] if f >= n["frame"])
     if act2:
-        unread += sum(1 for t in CH()["events"]["toasts"] if t["frame"] <= f) + int(sum(spd(k) ** 1.6 for k in range(E["typing_start"], f + 1)) * 1.2)
-    menubar(img, f, bell=unread)
-    if E["notif1"] <= f <= B["notifs_out"]:
-        draw_big_notifs(img, f)
+        unread += sum(1 for t in CH()["events"]["toasts"] if t["frame"] <= f) + \
+            int(sum(spd(k) ** 1.6 for k in range(E["typing_start"], f + 1)) * 1.2)
+    menubar(img, f, sc=LSC, bell=unread)
+    if in_notifs:
+        notif_stack(img, f)
     if act2:
-        draw_mini_toasts(img, f, fmax=E["tutorial_2x"] - 1)
+        draw_toasts(img, f, fmax=E["tutorial_2x"] - 1)
     return img
 
 
-# --- tutorial (233-269) ------------------------------------------------------
+# --- tutorial (tutorial_2x .. notif_do_that) ---------------------------------
 TUT_STEPS = ["Install the framework", "Create your first agent", "Add memory", "Add tools", "Add a planner",
              "Connect a vector store", "Add evals", "Migrate to v2", "Undo the migration", "Add a second agent",
              "Agents managing agents", "Reflection loop", "Deploy it", "Monitor it", "Scale to 1,000 agents",
@@ -1020,12 +1075,12 @@ TUT_STEPS = ["Install the framework", "Create your first agent", "Add memory", "
 TUT_CODE = [
     "agent = Agent(model=\"latest\")", "agent.add_tool(search)", "memory = Memory(max_items=10_000)",
     "agent.attach(memory)", "plan = planner.make_plan(goal)", "for step in plan:", "    agent.run(step)",
-    "result = await agent.ask(question)", "store = VectorStore(dim=1536)", "evals.run(agent, suite=\"all\")",
-    "from agentflow import Agent  # v2", "agent = Agent.from_config(\"v3.yaml\")", "team = [Agent() for _ in range(8)]",
+    "result = await agent.ask(q)", "store = VectorStore(dim=1536)", "evals.run(agent, suite=\"all\")",
+    "from agentflow import Agent  # v2", "agent = Agent.from_config(\"v3\")", "team = [Agent() for _ in range(8)]",
     "boss = Agent(role=\"manager\")", "boss.delegate(team)", "agent.reflect(depth=3)", "deploy(agent, replicas=1000)",
     "cache = PromptCache(ttl=3600)", "agent.learn(\"everything\")", "if agent.score > me.score:", "    me.retire()",
 ]
-TUT_CAPS = ["so first we install the framework", "this part is really simple", "now we just wire the planner into memory",
+TUT_CAPS = ["so first we install the framework", "this part is really simple", "now we wire the planner into memory",
             "don't worry, this changes next week", "pause here if you need to", "okay this is deprecated now but",
             "just copy this from the docs", "and that's basically an agent", "now let's make it scale",
             "you'll want to rewrite this for v3", "trust me on this one", "this used to be a whole job",
@@ -1051,108 +1106,138 @@ def tut_phase_table():
     return out
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=96)
 def tut_slide(idx):
     rng = frng("slide", idx)
     img = vgrad(LW, LH, (16, 19, 26), (10, 12, 17))
     d = ImageDraw.Draw(img)
     accent = [BLUE, VIOLET, GREEN, AMBER, CYAN][idx % 5]
-    tracked(d, (64, 64), "BUILD AN AI AGENT IN 10 MINUTES  ·  EP. 47", F(16, 700), TXT3, 1.8)
-    fill_rect(img, (64, 82, 124, 86), accent)
-    d.text((64, 160), f"Step {idx + 1}:", font=F(34, 600), fill=accent, anchor="ls")
+    tracked(d, (64, 70), "BUILD AN AI AGENT IN 10 MINUTES · EP. 47", F(20, 750), TXT3, 2.0)
+    fill_rect(img, (64, 90, 132, 95), accent)
+    d.text((64, 172), f"Step {idx + 1}:", font=F(42, 650), fill=accent, anchor="ls")
     title = TUT_STEPS[idx % len(TUT_STEPS)]
-    d.text((64, 226), title, font=fit(title, 1150, 64, 800, 40), fill=WHITE, anchor="ls")
+    d.text((64, 250), title, font=fit(title, 780, 76, 820, 44), fill=WHITE, anchor="ls")
     # code panel
-    cx0, cy0, cx1, cy1 = 64, 276, 760, 660
-    fill_rr(img, (cx0, cy0, cx1, cy1), 14, (22, 26, 34))
+    cx0, cy0, cx1, cy1 = 64, 296, 790, 652
+    fill_rr(img, (cx0, cy0, cx1, cy1), 16, (22, 26, 34))
     for i, c in enumerate((RED, AMBER, GREEN)):
-        fill_circle(img, cx0 + 24 + i * 20, cy0 + 22, 11, c, 0.7)
-    fm = MONO(21)
+        fill_circle(img, cx0 + 26 + i * 22, cy0 + 24, 12, c, 0.7)
+    fm = MONO(24)
     cw = fm.getlength("M")
     start = rng.randrange(len(TUT_CODE))
-    for i in range(11):
+    for i in range(8):
         line = TUT_CODE[(start + i * 3) % len(TUT_CODE)]
-        draw_code_line(d, cx0 + 64, cy0 + 72 + i * 30, line, fm, cw)
-        d.text((cx0 + 42, cy0 + 72 + i * 30), str(i + 1), font=MONO(16), fill=TXT3, anchor="rs")
+        y = cy0 + 82 + i * 36
+        draw_code_line(d, cx0 + 66, y, line, fm, cw)
+        d.text((cx0 + 44, y), str(i + 1), font=MONO(18), fill=TXT3, anchor="rs")
     # right side: diagram or bullets
     if idx % 2 == 0:
-        boxes = [("INPUT", 840, 300), ("AGENT", 990, 420), ("TOOLS", 840, 540), ("OUTPUT", 1110, 560)]
+        boxes = [("INPUT", 836, 310), ("AGENT", 990, 430), ("TOOLS", 836, 556), ("OUTPUT", 1086, 572)]
         for (a, b) in ((0, 1), (2, 1), (1, 3)):
-            ax, ay = boxes[a][1] + 70, boxes[a][2] + 30
-            bx, by = boxes[b][1] + 70, boxes[b][2] + 30
+            ax, ay = boxes[a][1] + 76, boxes[a][2] + 32
+            bx, by = boxes[b][1] + 76, boxes[b][2] + 32
             aa(img, (90, 100, 120), lambda dd, P, ss, ax=ax, ay=ay, bx=bx, by=by: dd.line([P(ax, ay), P(bx, by)], fill=255, width=3 * ss),
-               box=(800, 280, 1260, 640))
+               box=(800, 290, 1270, 650))
         for name, x, y in boxes:
-            fill_rr(img, (x, y, x + 140, y + 60), 12, (30, 36, 48))
-            ring_rr(img, (x, y, x + 140, y + 60), 12, 2, accent)
-            d.text((x + 70, y + 30), name, font=F(20, 750), fill=WHITE, anchor="mm")
+            fill_rr(img, (x, y, x + 152, y + 64), 14, (30, 36, 48))
+            ring_rr(img, (x, y, x + 152, y + 64), 14, 2, accent)
+            d.text((x + 76, y + 32), name, font=F(23, 780), fill=WHITE, anchor="mm")
     else:
         items = rng.sample(["it's that easy", "no theory needed", "works in v2 (maybe)", "copy-paste friendly",
                             "10 lines of code", "production ready*", "scales infinitely", "beginner friendly"], 4)
         for i, it in enumerate(items):
-            y = 330 + i * 74
-            fill_circle(img, 818, y - 9, 14, accent)
-            d.text((840, y), it, font=F(30, 600), fill=TXT, anchor="ls")
+            y = 350 + i * 74
+            fill_circle(img, 840, y - 10, 16, accent)
+            d.text((864, y), it, font=F(30, 650), fill=TXT, anchor="ls")
     return img
 
 
 @lru_cache(maxsize=48)
 def caption_img(text):
-    fnt = F(32, 650)
-    w = int(fnt.getlength(text)) + 44
-    im = Image.new("RGBA", (w, 56), (0, 0, 0, 0))
-    bg = Image.new("RGBA", (w, 56), (0, 0, 0, 255))
-    bg.putalpha(scale_mask(rr_mask(w, 56, 8), 0.78))
+    fnt = F(34, 680)
+    w = int(fnt.getlength(text)) + 48
+    im = Image.new("RGBA", (w, 60), (0, 0, 0, 0))
+    bg = Image.new("RGBA", (w, 60), (0, 0, 0, 255))
+    bg.putalpha(scale_mask(rr_mask(w, 60, 10), 0.8))
     im.alpha_composite(bg)
-    ImageDraw.Draw(im).text((w / 2, 29), text, font=fnt, fill=WHITE, anchor="mm")
+    ImageDraw.Draw(im).text((w / 2, 31), text, font=fnt, fill=WHITE, anchor="mm")
     return im
 
 
 @lru_cache(maxsize=8)
 def speed_badge(label, hot):
-    fnt = F(120, 850)
+    fnt = F(124, 860)
     tw = fnt.getlength(label)
-    w, h = int(tw + 150), 156
-    pad = 30
-    im = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(w, h, 30, 14)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.7))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 6))
-    body = Image.new("RGBA", (w, h), (12, 13, 16, 255))
-    body.putalpha(scale_mask(rr_mask(w, h, 30), 0.88))
-    im.alpha_composite(body, (pad, pad))
-    border = Image.new("RGBA", (w, h), (AMBER if hot else (255, 255, 255)) + (0,))
-    border.putalpha(scale_mask(rr_ring(w, h, 30, 3), 0.9 if hot else 0.35))
-    im.alpha_composite(border, (pad, pad))
-    ic = Image.new("RGBA", (64, 64), (AMBER if hot else WHITE) + (255,))
-    ic.putalpha(icon_mask("ff", 64))
-    im.alpha_composite(ic, (pad + 32, pad + h // 2 - 32))
-    ImageDraw.Draw(im).text((pad + 116, pad + h / 2 + 4), label, font=fnt, fill=WHITE, anchor="lm")
+    w, h = int(tw + 156), 160
+    im, pad = card(w, h, (14, 15, 18), (10, 11, 14), AMBER if hot else WHITE, r=32,
+                   border=0.95 if hot else 0.35, bw=3.5, blur=14, op=0.7, dy=6)
+    im.alpha_composite(icon_layer("ff", 66, AMBER if hot else WHITE), (pad + 34, pad + h // 2 - 33))
+    ImageDraw.Draw(im).text((pad + 120, pad + h / 2 + 4), label, font=fnt, fill=WHITE, anchor="lm")
     return im, pad
+
+
+def draw_badge(img, label, hot, age):
+    """The speed badge, top right, always crisp; a short eased pop when it changes."""
+    bi, pad = speed_badge(label, hot)
+    sc = 1.0 + 0.3 * (1 - ease_out_back((age + 1) / 5)) if age < 5 else 1.0
+    bw, bh = bi.width - 2 * pad, bi.height - 2 * pad
+    cx, cy = LW - 30 - bw / 2, 36 + bh / 2
+    place_c(img, bi, cx, cy, 1.0, scale=sc)
+    return cy + bh / 2
+
+
+@lru_cache(maxsize=64)
+def updates_pill(n):
+    label = f"+{n} updates"
+    fnt = F(26, 780)
+    w, h = int(fnt.getlength(label)) + 92, 58
+    im, pad = card(w, h, (44, 34, 14), (34, 26, 10), WARN, r=29, border=0.8, bw=2, blur=10, op=0.6, dy=5)
+    im.alpha_composite(icon_layer("bell", 28, WARN), (pad + 24, pad + 15))
+    ImageDraw.Draw(im).text((pad + 64, pad + h / 2 + 1), label, font=fnt, fill=(255, 226, 170), anchor="lm")
+    return im, pad
+
+
+def draw_updates(img, f, y_top):
+    """Toast ticks during the tutorial collapse into ONE counter pill under the badge."""
+    ts = [t["frame"] for t in CH()["events"]["toasts"] if E["tutorial_2x"] <= t["frame"] <= f]
+    if not ts:
+        return
+    first, last = ts[0], ts[-1]
+    im, pad = updates_pill(len(ts))
+    k = enter_k(f - first)
+    pop = 1.0 + 0.1 * (1 - ease_out((f - last + 1) / 4)) if f - last < 4 else 1.0
+    w = im.width - 2 * pad
+    place_c(img, im, LW - 30 - w / 2, y_top + 18 + im.height / 2 - pad, k, dx=60, scale=pop)
 
 
 def tut_clean(f):
     ph = tut_phase_table()[min(f, E["notif_better"])]
-    idx = int(ph)
-    img = tut_slide(idx).copy()
-    return img, ph
+    return tut_slide(int(ph)).copy(), ph
 
 
 def tut_overlays(img, f, ph, chaos):
     d = ImageDraw.Draw(img)
-    # captions
-    cap = TUT_CAPS[int(ph * 2.3) % len(TUT_CAPS)]
-    ci = caption_img(cap)
+    ci = caption_img(TUT_CAPS[int(ph * 2.3) % len(TUT_CAPS)])
     if chaos > 0:
         ci = hsmear(ci.convert("RGBA"), 6 + 40 * chaos)
-    paste_rgba(img, ci, (LW - ci.width) / 2, 690)
-    # progress
+    paste_rgba(img, ci, (LW - ci.width) / 2, 682)
     prog = clamp(0.22 + (ph - 2.2) * 0.028)
-    fill_rect(img, (0, LH - 8, LW, LH), (60, 64, 74))
-    fill_rect(img, (0, LH - 8, LW * prog, LH), BLUE)
-    left = max(0, int((1 - prog) * 600))
-    d.text((LW - 24, LH - 22), f"{fmt_t(left)} left", font=F(18, 600), fill=TXT2, anchor="rs")
+    fill_rect(img, (0, LH - 10, LW, LH), (60, 64, 74))
+    fill_rect(img, (0, LH - 10, LW * prog, LH), BLUE)
+    d.text((LW - 26, LH - 24), f"{fmt_t(max(0, int((1 - prog) * 600)))} left", font=F(20, 650), fill=TXT2, anchor="rs")
+
+
+def smear_stack(img, idx, chaos, trail=((0.26, -50), (0.2, -110), (0.12, -180), (0.06, -260))):
+    """Previous slides ghost to the left: the deliberate 'falling apart' look at 16x+."""
+    acc = np.asarray(img, np.float32) * 0.36
+    wsum = 0.36
+    for k, (wgt, dx) in enumerate(trail, start=1):
+        if idx - k < 0:
+            break
+        acc += np.roll(np.asarray(tut_slide(idx - k), np.float32), int(dx * chaos), axis=1) * wgt
+        wsum += wgt
+    img = Image.fromarray((acc / wsum).clip(0, 255).astype(np.uint8))
+    return Image.blend(img, hsmear(img, 10 + 30 * chaos), 0.45 * chaos)
 
 
 def lap_tutorial(f):
@@ -1161,123 +1246,82 @@ def lap_tutorial(f):
     chaos = 0.0
     if m == 4:
         frac = ph % 1.0
-        if frac < 0.25 and int(ph) > 0:  # quick cross-fade on each flip
+        if frac < 0.25 and int(ph) > 0:          # quick cross-fade on each slide flip
             img = Image.blend(tut_slide(int(ph) - 1), img, 0.35 + frac * 2.6)
     if m == 16:
-        chaos = clamp(0.55 + (f - E["tutorial_16x"]) / 14, 0, 1)
-        idx = int(ph)
-        acc = np.asarray(img, np.float32) * 0.36
-        wsum = 0.36
-        for k, (wgt, dx) in enumerate(((0.26, -50), (0.2, -110), (0.12, -180), (0.06, -260)), start=1):
-            if idx - k < 0:
-                break
-            sl = np.asarray(tut_slide(idx - k), np.float32)
-            acc += np.roll(sl, int(dx * chaos), axis=1) * wgt
-            wsum += wgt
-        img = Image.fromarray((acc / wsum).clip(0, 255).astype(np.uint8))
-        img = Image.blend(img, hsmear(img, 10 + 30 * chaos), 0.55 * chaos)
+        chaos = clamp(0.45 + (f - E["tutorial_16x"]) / 18, 0, 0.9)
+        img = smear_stack(img, int(ph), chaos)
     tut_overlays(img, f, ph, chaos)
-    if m == 16:
+    if m == 16:                                   # deliberate glitch (the video falls apart)
         rng = frng("tutglitch", f)
-        img = glitch(img, rng, n=int(4 + 8 * chaos), maxshift=int(60 + 140 * chaos), split=int(4 + 8 * chaos))
-        d = ImageDraw.Draw(img)
-        for _ in range(int(3 + 6 * chaos)):  # caption streaks
-            y = rng.randint(640, 760)
-            x0 = rng.randint(0, 500)
-            fill_rect(img, (x0, y, x0 + rng.randint(300, 900), y + rng.randint(2, 6)), WHITE, rng.uniform(0.3, 0.8))
-    # mini toasts keep ticking (sound sync), parked bottom-left, small
-    draw_mini_toasts(img, f, x_right=LW - 30, y_top=214, life_base=18, fmin=E["tutorial_2x"])
-    # the badge, always crisp
-    label = f"{m}x"
-    bi, pad = speed_badge(label, m == 16)
+        img = glitch(img, rng, n=int(3 + 4 * chaos), maxshift=int(40 + 80 * chaos), split=int(2 + 4 * chaos))
     switch = {2: E["tutorial_2x"], 4: E["tutorial_4x"], 16: E["tutorial_16x"]}[m]
-    age = f - switch
-    sc = 1.0 + 0.32 * (1 - ease_out_back((age + 1) / 5)) if age < 5 else 1.0
-    if sc != 1.0:
-        bi = bi.resize((int(bi.width * sc), int(bi.height * sc)), Image.BILINEAR)
-    bx = LW - 30 - (bi.width - 2 * pad * sc) - pad * sc
-    by = 36 - pad * sc - (sc - 1) * 60
-    paste_rgba(img, bi, bx, by, pop=0.4 if age == 0 else 0.0)
+    y = draw_badge(img, f"{m}x", m == 16, f - switch)
+    draw_updates(img, f, y)
     return img
 
 
-# --- hero: AI CAN NOW DO THAT FOR YOU. ----------------------------------------
+# --- hero: AI CAN NOW DO THAT FOR YOU. (notif_do_that .. notif_better) --------
 @lru_cache(maxsize=1)
-def hero_bg():
+def hero_sharp():
     ph = tut_phase_table()[E["notif_do_that"]]
     img = tut_slide(int(ph)).copy()
     tut_overlays(img, E["notif_do_that"], ph, 0.0)
-    img = img.filter(ImageFilter.GaussianBlur(7))
-    img = dim(img, 0.32)
-    d = ImageDraw.Draw(img)
-    fill_circle(img, LW / 2, 640, 70, (0, 0, 0), 0.5)
-    icon(img, "pause", LW / 2 - 15, 625, 30, (150, 150, 150))
+    return img
+
+
+@lru_cache(maxsize=1)
+def hero_back():
+    img = dim(hero_sharp().filter(ImageFilter.GaussianBlur(10)), 0.3)
+    fill_circle(img, LW / 2, 714, 64, BLACK, 0.5)          # the video is paused
+    icon(img, "pause", LW / 2 - 14, 700, 28, (150, 150, 150))
     return img
 
 
 @lru_cache(maxsize=1)
 def hero_card():
-    text = "AI CAN NOW DO THAT FOR YOU."
-    w, h = 1100, 232
-    pad = 60
-    im = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(w, h, 30, 26)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.75))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 14))
-    body = Image.new("RGBA", (w, h))
-    body.paste(vgrad(w, h, (58, 122, 246), (36, 90, 214)), (0, 0))
-    body.putalpha(rr_mask(w, h, 30))
-    im.alpha_composite(body, (pad, pad))
-    border = Image.new("RGBA", (w, h), (170, 205, 255, 0))
-    border.putalpha(scale_mask(rr_ring(w, h, 30, 2), 0.7))
-    im.alpha_composite(border, (pad, pad))
+    w, h = 1140, 384
+    im, pad = card(w, h, (64, 130, 252), (36, 92, 216), (196, 220, 255), r=R_HERO, border=0.75, bw=2.5,
+                   blur=30, op=0.72, dy=16)
     d = ImageDraw.Draw(im)
-    # header row: friendly sparkle + label + now
-    ic = Image.new("RGBA", (46, 46), (255, 255, 255, 255))
-    ic.putalpha(icon_mask("sparkle", 46))
-    im.alpha_composite(ic, (pad + 40, pad + 24))
-    d.text((pad + 98, pad + 48), "Assistant", font=F(24, 650), fill=(225, 236, 255), anchor="lm")
-    d.text((pad + w - 40, pad + 48), "now", font=F(22, 500), fill=(200, 218, 255), anchor="rm")
-    fnt = fit(text, w - 90, 62, 820, 44)
-    d.text((pad + w / 2, pad + 158), text, font=fnt, fill=WHITE, anchor="mm")
+    im.alpha_composite(icon_layer("sparkle", 46, WHITE), (pad + 48, pad + 34))
+    d.text((pad + 108, pad + 58), "Assistant", font=F(27, 680), fill=(228, 238, 255), anchor="lm")
+    d.text((pad + w - 48, pad + 58), "now", font=F(24, 500), fill=(205, 222, 255), anchor="rm")
+    lines = ["AI CAN NOW DO", "THAT FOR YOU."]
+    fnt = fit_lines(lines, w - 128, 124, 880)
+    cap, lh = fnt.size * 0.73, fnt.size * 1.08
+    y0 = pad + 112 + (h - 112 - 34 - (cap + lh)) / 2 + cap
+    for i, ln in enumerate(lines):
+        d.text((pad + w / 2, y0 + i * lh), ln, font=fnt, fill=WHITE, anchor="ms")
     return im, pad
 
 
 def lap_hero(f):
-    img = hero_bg().copy()
-    im, pad = hero_card()
-    age = f - E["notif_do_that"]
-    sc = lerp(0.9, 1.0, ease_out_back((age + 1) / 4, 1.2)) if age < 4 else 1.0
-    op = clamp((age + 1) / 2)
-    if sc != 1.0:
-        im = im.resize((int(im.width * sc), int(im.height * sc)), Image.BILINEAR)
-    paste_rgba(img, im, (LW - im.width) / 2, (LH - im.height) / 2 - 10, opacity=op, pop=0.3 if age == 0 else 0.0)
-    menubar(img, E["notif_do_that"], bell=None, alpha=0.6)
+    k = enter_k(f - E["notif_do_that"])
+    img = Image.blend(hero_sharp(), hero_back(), k) if k < 0.999 else hero_back().copy()
+    im, _ = hero_card()
+    place_c(img, im, LW / 2, LH / 2 - 6, k, dy=44, scale0=0.95)
     return img
 
 
-# --- takeover: NEW MODEL. BETTER AT EVERYTHING. --------------------------------
+# --- takeover: NEW MODEL. BETTER AT EVERYTHING. (notif_better .. builder_start) --
 @lru_cache(maxsize=1)
 def takeover_base():
     yy, xx = np.mgrid[0:LH, 0:LW].astype(np.float32)
     r = np.sqrt(((xx - LW / 2) / LW) ** 2 + ((yy - LH / 2) / LH) ** 2)
-    k = np.clip(1 - r * 1.3, 0, 1)[..., None]
-    arr = np.array([96, 6, 12], np.float32) * (1 - k) + np.array([200, 18, 28], np.float32) * k
-    stripes = (((xx + yy) // 40) % 2 == 0)[..., None] * 6.0
+    k = np.clip(1 - r * 1.25, 0, 1)[..., None]
+    arr = np.array([110, 8, 16], np.float32) * (1 - k) + np.array([222, 28, 38], np.float32) * k
+    stripes = (((xx + yy) // 46) % 2 == 0)[..., None] * 5.0
     img = Image.fromarray((arr + stripes).clip(0, 255).astype(np.uint8))
-    w, h = 1120, 400
-    x0, y0 = (LW - w) // 2, (LH - h) // 2
-    drop_shadow(img, (x0, y0, x0 + w, y0 + h), 26, blur=26, opacity=0.6, dy=14)
-    paste_grad_rr(img, (x0, y0, x0 + w, y0 + h), 26, (240, 46, 52), (206, 24, 34))
-    ring_rr(img, (x0, y0, x0 + w, y0 + h), 26, 3, (255, 190, 190), 0.8)
     d = ImageDraw.Draw(img)
-    icon(img, "warn", x0 + 44, y0 + 34, 44, WHITE)
-    tracked(d, (x0 + 104, y0 + 68), "SYSTEM ALERT", F(24, 800), (255, 220, 220), 3)
-    d.text((x0 + w - 44, y0 + 68), "now", font=F(24, 500), fill=(255, 210, 210), anchor="rs")
-    d.text((LW / 2, y0 + 200), "NEW MODEL.", font=F(112, 900), fill=WHITE, anchor="mm")
-    t2 = "BETTER AT EVERYTHING."
-    d.text((LW / 2, y0 + 316), t2, font=fit(t2, w - 100, 76, 850), fill=WHITE, anchor="mm")
+    icon(img, "warn", 64, 54, 58, WHITE)
+    tracked(d, (140, 98), "SYSTEM ALERT", F(32, 820), (255, 224, 224), 4)
+    d.text((LW - 64, 98), "now", font=F(28, 500), fill=(255, 210, 210), anchor="rs")
+    fill_rect(img, (64, 146, LW - 64, 149), (255, 190, 190), 0.6)
+    t1, t2 = "NEW MODEL.", "BETTER AT EVERYTHING."
+    d.text((LW / 2, 420), t1, font=fit(t1, LW - 120, 210, 900), fill=WHITE, anchor="ms")
+    d.text((LW / 2, 590), t2, font=fit(t2, LW - 120, 116, 880), fill=WHITE, anchor="ms")
+    d.text((LW / 2, 700), "Your current skills are now legacy.", font=F(30, 600), fill=(255, 205, 205), anchor="ms")
     return img
 
 
@@ -1288,102 +1332,85 @@ def lap_takeover(f):
     img = takeover_base()
     if age == 1:
         return Image.blend(img, Image.new("RGB", (LW, LH), WHITE), 0.6)
-    if age <= 6:
+    if age <= 4:                                   # deliberate 3-frame glitch entrance, then rock solid
         rng = frng("takeover", f)
-        k = 1 - (age - 2) / 5
+        k = 1 - (age - 2) / 3
         jx, jy = rng.randint(-40, 40) * k, rng.randint(-16, 16) * k
         out = Image.new("RGB", (LW, LH), (120, 8, 14))
         out.paste(img, (int(jx), int(jy)))
         out = glitch(out, rng, n=int(5 + 8 * k), maxshift=int(140 * k) + 10, split=int(12 * k) + 2)
-        if age in (3, 5):
-            out = ImageOps.invert(out) if age == 3 else Image.blend(out, Image.new("RGB", out.size, WHITE), 0.25)
+        if age == 3:
+            out = ImageOps.invert(out)
         return out
     return img.copy()
 
 
-# --- agent builder (331-386) -------------------------------------------------
-BUILD_NODES = [  # name, type, x, y
-    ("YOU", "INPUT", 236, 380),
-    ("READ ALL PAPERS", "TOOL", 452, 210),
-    ("TUTORIALS @16x", "TOOL", 452, 560),
-    ("SUMMARIZE", "LLM", 668, 384),
-    ("MEMORY (∞)", "MEMORY", 668, 620),
-    ("PLANNER", "PLANNER", 884, 236),
-    ("SELF-IMPROVE LOOP", "LOOP", 884, 520),
-    ("SKILL TRACKER", "TOOL", 1090, 200),
-    ("OUTPUT: ROADMAP", "OUTPUT", 1090, 430),
+# --- agent builder (builder_start .. dashboard_start) -------------------------
+BUILD_NODES = [  # name, type, column, centre y
+    ("YOU", "INPUT", 0, 440),
+    ("READ ALL PAPERS", "TOOL", 1, 270),
+    ("TUTORIALS @16x", "TOOL", 1, 580),
+    ("SUMMARIZE", "LLM", 2, 420),
+    ("MEMORY (∞)", "MEMORY", 2, 640),
+    ("PLANNER", "PLANNER", 3, 250),
+    ("SELF-IMPROVE LOOP", "LOOP", 3, 500),
+    ("SKILL TRACKER", "TOOL", 4, 230),
+    ("OUTPUT: ROADMAP", "OUTPUT", 4, 450),
 ]
 BUILD_EDGES = [(0, 1), (0, 2), (1, 3), (2, 3), (3, 4), (3, 5), (4, 6), (5, 6), (5, 7), (6, 8), (7, 8)]
-NODE_W, NODE_H = 172, 78
+NODE_W, NODE_H = 214, 104
+COL_X = [36, 282, 528, 774, 1020]
 TYPE_COL = {"INPUT": GREEN, "TOOL": BLUE, "LLM": VIOLET, "MEMORY": (236, 112, 200), "PLANNER": AMBER,
             "LOOP": ORANGE, "OUTPUT": CYAN}
+
+
+def node_xy(i):
+    _, _, c, cy = BUILD_NODES[i]
+    return COL_X[c], cy - NODE_H / 2
 
 
 @lru_cache(maxsize=1)
 def blueprint_bg():
     img = Image.new("RGB", (LW, LH), (9, 30, 60))
     arr = np.asarray(img).copy()
-    arr[:, ::24] = (16, 44, 82)
-    arr[::24, :] = (16, 44, 82)
-    arr[:, ::120] = (26, 64, 112)
-    arr[::120, :] = (26, 64, 112)
+    arr[:, ::40] = (14, 40, 76)
+    arr[::40, :] = (14, 40, 76)
+    arr[:, ::200] = (22, 58, 104)
+    arr[::200, :] = (22, 58, 104)
     img = Image.fromarray(arr)
     d = ImageDraw.Draw(img)
-    fill_rect(img, (0, 30, LW, 82), (7, 20, 40))
-    fill_rect(img, (0, 81, LW, 82), (30, 70, 120))
-    icon(img, "bolt", 20, 40, 32, CYAN)
-    tw = tracked(d, (64, 67), "AGENT BUILDER", F(26, 800), WHITE, 2.5)
-    d.text((64 + tw + 28, 59), "untitled_agent  ·  draft", font=F(16, 500), fill=(120, 160, 210), anchor="lm")
-    fill_rect(img, (0, 82, 196, LH), (7, 22, 44))
-    fill_rect(img, (196, 82, 197, LH), (30, 70, 120))
-    tracked(d, (20, 116), "NODES", F(13, 800), (110, 150, 200), 2)
-    for i, t in enumerate(["INPUT", "TOOL", "LLM", "MEMORY", "PLANNER", "LOOP", "OUTPUT"]):
-        y = 134 + i * 50
-        fill_rr(img, (16, y, 180, y + 40), 8, (14, 38, 70))
-        fill_rr(img, (16, y, 22, y + 40), 3, TYPE_COL[t])
-        d.text((34, y + 20), {"LLM": "LLM"}.get(t, t.title()), font=F(16, 600), fill=(200, 220, 245), anchor="lm")
+    fill_rect(img, (0, LMENU, LW, LMENU + 64), (7, 20, 40))
+    fill_rect(img, (0, LMENU + 63, LW, LMENU + 64), (30, 70, 120))
+    icon(img, "bolt", 24, LMENU + 14, 36, CYAN)
+    tracked(d, (72, LMENU + 44), "AGENT BUILDER", F(30, 820), WHITE, 3)
     return img
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=24)
 def node_img(i, lit):
     name, typ, _, _ = BUILD_NODES[i]
     col = TYPE_COL[typ]
-    pad = 16
-    im = Image.new("RGBA", (NODE_W + 2 * pad, NODE_H + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(NODE_W, NODE_H, 12, 8)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.6))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 5))
-    body = Image.new("RGBA", (NODE_W, NODE_H), (16, 40, 74, 255))
-    hdr = Image.new("RGB", (NODE_W, 26), mix(col, (16, 40, 74), 0.45 if lit else 0.7))
-    body.paste(hdr, (0, 0))
-    body.putalpha(rr_mask(NODE_W, NODE_H, 12))
-    im.alpha_composite(body, (pad, pad))
-    border = Image.new("RGBA", (NODE_W, NODE_H), (CYAN if lit else (90, 150, 210)) + (0,))
-    border.putalpha(scale_mask(rr_ring(NODE_W, NODE_H, 12, 1.8), 0.95 if lit else 0.6))
-    im.alpha_composite(border, (pad, pad))
+    im, pad = card(NODE_W, NODE_H, (18, 44, 80), (14, 36, 68), CYAN if lit else (100, 160, 220), r=16,
+                   border=0.95 if lit else 0.6, bw=2.2, blur=10, op=0.6, dy=6)
+    hdr = Image.new("RGBA", (NODE_W, 34), mix(col, (16, 40, 74), 0.35 if lit else 0.6) + (255,))
+    m = rr_mask(NODE_W, NODE_H, 16).crop((0, 0, NODE_W, 34))
+    hdr.putalpha(m)
+    im.alpha_composite(hdr, (pad, pad))
     d = ImageDraw.Draw(im)
-    tracked(d, (pad + 12, pad + 18), typ, F(12, 800), WHITE, 1.4)
-    led = GREEN if lit else (60, 80, 100)
-    d.ellipse((pad + NODE_W - 22, pad + 8, pad + NODE_W - 12, pad + 18), fill=led)
-    fnt = fit(name, NODE_W - 30, 19, 750, 12)
-    d.text((pad + 12, pad + 54), name, font=fnt, fill=WHITE, anchor="lm")
+    tracked(d, (pad + 16, pad + 24), typ, F(16, 820), WHITE, 1.8)
+    d.ellipse((pad + NODE_W - 28, pad + 10, pad + NODE_W - 14, pad + 24), fill=GREEN if lit else (60, 80, 100))
+    d.text((pad + 16, pad + 70), name, font=fit(name, NODE_W - 30, 25, 780, 16), fill=WHITE, anchor="lm")
     for px in (pad, pad + NODE_W):
-        d.ellipse((px - 6, pad + 46, px + 6, pad + 58), fill=CYAN, outline=(9, 30, 60), width=2)
+        d.ellipse((px - 8, pad + 62, px + 8, pad + 78), fill=CYAN, outline=(9, 30, 60), width=3)
     return im, pad
 
 
-def node_ports(i):
-    _, _, x, y = BUILD_NODES[i]
-    return (x + NODE_W, y + 52), (x, y + 52)
-
-
 def edge_curve(a, b, t1=1.0):
-    (ox, oy), _ = node_ports(a)
-    _, (ix, iy) = node_ports(b)
-    dx = max(70, (ix - ox) * 0.5)
-    return bezier((ox, oy), (ox + dx, oy), (ix - dx, iy), (ix, iy), n=40, t1=t1)
+    ax, ay = node_xy(a)
+    bx, by = node_xy(b)
+    o, i_ = (ax + NODE_W, ay + 70), (bx, by + 70)
+    dx = max(70, (i_[0] - o[0]) * 0.5)
+    return bezier(o, (o[0] + dx, o[1]), (i_[0] - dx, i_[1]), i_, n=40, t1=t1)
 
 
 def lap_builder(f):
@@ -1394,189 +1421,199 @@ def lap_builder(f):
     lit = f >= E["machine_lights"]
     n_built = sum(1 for sf in spawned if f >= sf)
     if n_built == 0:
-        ring = (440, 300, 1040, 520)
-        for k in range(0, 1200, 24):  # dashed drop zone
-            p = k / 1200 * 2 * (600 + 220)
-            x0, y0, x1, y1 = ring
-            if p < 600:
-                pt = (x0 + p, y0)
-            elif p < 820:
-                pt = (x1, y0 + p - 600)
-            elif p < 1420:
-                pt = (x1 - (p - 820), y1)
-            else:
-                pt = (x0, y1 - (p - 1420))
-            fill_circle(img, pt[0], pt[1], 4, (90, 150, 210))
-        d.text((740, 400), "+  Drop nodes here to build an agent", font=F(26, 600), fill=(150, 190, 235), anchor="mm")
-    # wires
-    for a, b in BUILD_EDGES:
+        x0, y0, x1, y1 = 300, 300, 980, 540
+        per = 2 * ((x1 - x0) + (y1 - y0))
+        for p in range(0, per, 26):                # dashed drop zone
+            pt = ((x0 + p, y0) if p < x1 - x0 else (x1, y0 + p - (x1 - x0)) if p < (x1 - x0) + (y1 - y0) else
+                  (x1 - (p - (x1 - x0) - (y1 - y0)), y1) if p < 2 * (x1 - x0) + (y1 - y0) else
+                  (x0, y1 - (p - 2 * (x1 - x0) - (y1 - y0))))
+            fill_circle(img, pt[0], pt[1], 6, (100, 160, 220))
+        d.text((640, 432), "+  Drop nodes here to build an agent", font=F(32, 650), fill=(160, 200, 240), anchor="mm")
+    for a, b in BUILD_EDGES:                       # wires draw on
         t0 = max(spawned[a], spawned[b])
         if f < t0:
             continue
-        t = clamp((f - t0 + 1) / 3)
-        pts = edge_curve(a, b, ease_out(t))
-        aa(img, CYAN, lambda dd, P, ss, pts=pts: dd.line([P(*p) for p in pts], fill=255, width=int(3 * ss), joint="curve"),
-           box=(190, 80, LW, LH), alpha=0.85 if lit else 0.6)
-    # data packets once the machine is lit
-    if lit:
+        pts = edge_curve(a, b, ease_out((f - t0 + 1) / 4))
+        aa(img, CYAN, lambda dd, P, ss, pts=pts: dd.line([P(*p) for p in pts], fill=255, width=int(4 * ss), joint="curve"),
+           box=(0, LMENU + 64, LW, LH), alpha=0.9 if lit else 0.6)
+    if lit:                                         # data packets once the machine is lit
         for ei, (a, b) in enumerate(BUILD_EDGES):
             pts = edge_curve(a, b)
             for k in range(2):
-                ph = ((f - E["machine_lights"]) * (0.09 + 0.05 * spd(f)) + ei * 0.31 + k * 0.5) % 1.0
+                ph = ((f - E["machine_lights"]) * (0.07 + 0.04 * spd(f)) + ei * 0.31 + k * 0.5) % 1.0
                 p = pts[int(ph * (len(pts) - 1))]
-                fill_circle(img, p[0], p[1], 12, WHITE)
-                fill_circle(img, p[0], p[1], 22, CYAN, 0.35)
-    # nodes pop in on the machine_parts beats
-    for i, sf in enumerate(spawned):
+                fill_circle(img, p[0], p[1], 26, CYAN, 0.3)
+                fill_circle(img, p[0], p[1], 13, WHITE)
+    for i, sf in enumerate(spawned):               # nodes pop in on the machine_parts beats
         if f < sf:
             continue
         age = f - sf
-        im, pad = node_img(i, lit)
-        sc = [0.55, 1.12, 1.03, 1.0][age] if age < 4 else 1.0
-        x, y = BUILD_NODES[i][2], BUILD_NODES[i][3]
-        if sc != 1.0:
-            im = im.resize((int(im.width * sc), int(im.height * sc)), Image.BILINEAR)
-        cx, cy = x + NODE_W / 2, y + NODE_H / 2
-        paste_rgba(img, im, cx - im.width / 2, cy - im.height / 2, pop=0.6 if age == 0 else 0.25 if age == 1 else 0)
-    # status + deploy button
+        im, _ = node_img(i, lit)
+        x, y = node_xy(i)
+        place_c(img, im, x + NODE_W / 2, y + NODE_H / 2, enter_k(age, 4), dy=18, scale0=0.8)
+    # status chip + deploy button
     if f < E["build_start"]:
         status = "Empty canvas"
     elif f <= E["build_end"]:
-        status = f"Building…  {n_built}/{len(BUILD_NODES)} nodes"
+        status = f"Building…  {n_built} / {len(BUILD_NODES)} nodes"
     elif f < E["button_press"]:
         status = "Ready to deploy"
     else:
         status = "Deployed"
-    d.text((LW - 24, 56), status, font=F(18, 650), fill=CYAN if f >= E["build_start"] else (120, 160, 210), anchor="rm")
-    bx0, by0, bx1, by1 = 1030, 700, 1250, 772
+    fs = F(22, 700)
+    sw = fs.getlength(status) + 40
+    fill_rr(img, (LW - 24 - sw, LMENU + 14, LW - 24, LMENU + 50), 18, (12, 44, 66))
+    d.text((LW - 24 - sw / 2, LMENU + 32), status, font=fs, fill=CYAN if f >= E["build_start"] else (130, 170, 215), anchor="mm")
+    bx0, by0, bx1, by1 = 1020, 690, 1244, 770
     pressed = f >= E["button_press"]
     ready = f > E["build_end"]
     if ready and not pressed:
-        glow = 0.35 + 0.35 * (0.5 + 0.5 * math.sin((f - E["machine_lights"]) * 0.9))
-        fill_rr(img, (bx0 - 10, by0 - 10, bx1 + 10, by1 + 10), 24, CYAN, glow * 0.5)
-    col = (12, 120, 140) if pressed else CYAN if ready else (40, 70, 100)
+        glow = 0.35 + 0.3 * (0.5 + 0.5 * math.sin((f - E["build_end"]) * 0.5))
+        fill_rr(img, (bx0 - 10, by0 - 10, bx1 + 10, by1 + 10), 26, CYAN, glow * 0.5)
     off = 4 if pressed else 0
-    fill_rr(img, (bx0 + off, by0 + off, bx1 - off, by1 - off), 18, col)
-    d.text(((bx0 + bx1) / 2, (by0 + by1) / 2), "DEPLOY  ▶", font=F(28, 850),
+    fill_rr(img, (bx0 + off, by0 + off, bx1 - off, by1 - off), 20, (12, 120, 140) if pressed else CYAN if ready else (40, 70, 100))
+    d.text(((bx0 + bx1) / 2, (by0 + by1) / 2), "DEPLOY  ▶", font=F(30, 850),
            fill=(4, 30, 40) if ready else (110, 140, 170), anchor="mm")
-    if pressed:
+    if pressed:                                     # AGENT ONLINE band
         age = f - E["button_press"]
-        a = ease_out((age + 1) / 3)
-        fill_rect(img, (0, 290, LW, 520), (2, 12, 22), 0.88 * a)
-        fill_rect(img, (0, 290, LW, 293), CYAN, a)
-        fill_rect(img, (0, 517, LW, 520), CYAN, a)
-        sc = lerp(1.25, 1.0, ease_out((age + 1) / 4))
-        fnt = F(int(118 * sc), 850)
+        a = enter_k(age, 4)
+        img = focus(img, 0.6 * a)
+        d = ImageDraw.Draw(img)
+        fill_rect(img, (0, 286, LW, 530), (2, 12, 22), 0.9 * a)
+        fill_rect(img, (0, 286, LW, 290), CYAN, a)
+        fill_rect(img, (0, 526, LW, 530), CYAN, a)
         label = "AGENT ONLINE"
+        fnt = fit(label, LW - 300, 130, 860)
         tw = fnt.getlength(label)
-        dot = 70 * sc
-        total = tw + 36 * sc + dot
-        x0 = (LW - total) / 2
-        col = mix(WHITE, CYAN, clamp(age / 2))
-        d.text((x0, 405), label, font=fnt, fill=col, anchor="lm")
-        pulse = 0.5 + 0.5 * math.sin(age * 0.8)
-        fill_circle(img, x0 + tw + 36 * sc + dot / 2, 405, dot * 1.6, CYAN, 0.18 + 0.12 * pulse)
-        fill_circle(img, x0 + tw + 36 * sc + dot / 2, 405, dot, CYAN)
-        if age < 2:
-            img = Image.blend(img, Image.new("RGB", img.size, (200, 250, 255)), 0.35 if age == 0 else 0.12)
-    menubar(img, f, app="Agent Builder", bell=None, bg=(5, 14, 28))
+        dot = 76
+        x0 = (LW - (tw + 40 + dot)) / 2 + (1 - a) * 40
+        d.text((x0, 408), label, font=fnt, fill=mix(BLACK, WHITE, a), anchor="lm")
+        cx = x0 + tw + 40 + dot / 2
+        fill_circle(img, cx, 408, dot * 1.7, CYAN, (0.16 + 0.1 * (0.5 + 0.5 * math.sin(age * 0.6))) * a)
+        fill_circle(img, cx, 408, dot, CYAN, a)
+    menubar(img, f, sc=LSC, app="Agent Builder", bell=None, bg=(5, 14, 28))
     return img
 
 
-# --- calm dashboard (387-410) -------------------------------------------------
+# --- calm dashboard + roadmap card (dashboard_start .. roadmap_open) ----------
+CALM_W, CALM_H = 1000, 470
+CALM_C = (LW / 2, 456)
+OPEN_BTN = (CALM_W - 48 - 250, CALM_H - 48 - 84, CALM_W - 48, CALM_H - 48)     # card-local
+CLICK = E["roadmap_open"] - 3                  # the cursor clicks OPEN
+CURSOR_IN = CLICK - 6                           # ... after drifting in from the corner
+
+
 @lru_cache(maxsize=1)
-def calm_toast():
-    text1, text2 = "YOUR PERSONALIZED AI LEARNING", "ROADMAP IS READY."
-    w, h = 720, 214
-    pad = 40
-    im = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(w, h, 20, 18)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.65))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 10))
-    body = Image.new("RGBA", (w, h))
-    body.paste(vgrad(w, h, (30, 40, 56), (22, 29, 41)), (0, 0))
-    body.putalpha(rr_mask(w, h, 20))
-    im.alpha_composite(body, (pad, pad))
-    border = Image.new("RGBA", (w, h), (110, 200, 230, 0))
-    border.putalpha(scale_mask(rr_ring(w, h, 20, 1.5), 0.5))
-    im.alpha_composite(border, (pad, pad))
-    tile = Image.new("RGBA", (64, 64), (40, 170, 200, 255))
-    tile.putalpha(rr_mask(64, 64, 16))
-    im.alpha_composite(tile, (pad + 26, pad + 28))
-    ic = Image.new("RGBA", (40, 40), (255, 255, 255, 255))
-    ic.putalpha(icon_mask("route", 40))
-    im.alpha_composite(ic, (pad + 38, pad + 40))
-    d = ImageDraw.Draw(im)
-    tracked(d, (pad + 108, pad + 44), "YOUR AGENT", F(15, 750), (130, 210, 235), 1.8)
-    d.text((pad + w - 24, pad + 44), "now", font=F(16, 500), fill=TXT2, anchor="rs")
-    fnt = fit(text1, w - 140, 38, 780, 28)
-    d.text((pad + 108, pad + 94), text1, font=fnt, fill=WHITE, anchor="ls")
-    d.text((pad + 108, pad + 142), text2, font=fnt, fill=WHITE, anchor="ls")
-    return im, pad
-
-
-def open_button_box():
-    pad_x = LW - 18 - 720
-    return (pad_x + 720 - 24 - 150, 44 + 214 - 24 - 50, pad_x + 720 - 24, 44 + 214 - 24)
-
-
-def lap_dashboard(f):
+def dash_bg():
     img = Image.new("RGB", (LW, LH), (11, 14, 19))
+    yy, xx = np.mgrid[0:LH, 0:LW].astype(np.float32)
+    g = np.clip(1 - np.sqrt(((xx - LW / 2) / LW) ** 2 + ((yy - 300) / LH) ** 2) * 1.8, 0, 1) ** 2
+    arr = np.asarray(img, np.float32) + g[..., None] * np.array([10, 34, 44], np.float32)
+    return Image.fromarray(arr.clip(0, 255).astype(np.uint8))
+
+
+def dash_base(f):
+    img = dash_bg().copy()
     d = ImageDraw.Draw(img)
-    menubar(img, f, app="Agent", bell=None)
-    t = f - B["dashboard_start"]
-    fill_circle(img, 48, 66, 14, CYAN, 0.6 + 0.4 * math.sin(f * 0.3))
-    tracked(d, (68, 74), "AGENT  ·  ONLINE", F(20, 800), CYAN, 2.4)
-    d.text((68, 104), "agent_v8 · learning for you", font=F(16, 500), fill=TXT3, anchor="ls")
-    # soft spinner
-    cx, cy, R = LW / 2, 352, 64
-    a0 = (f * 14) % 360
+    menubar(img, f, sc=LSC, app="Agent", bell=None)
+    t = f - E["dashboard_start"]
+    fill_circle(img, 58, 92, 18, CYAN, 0.65 + 0.35 * math.sin(f * 0.25))
+    tracked(d, (84, 102), "AGENT · ONLINE", F(26, 820), CYAN, 3)
+    d.text((84, 136), "agent_v8 · learning for you", font=F(20, 500), fill=TXT3, anchor="ls")
+    cx, cy, R = LW / 2, 300, 74
+    a0 = (f * 12) % 360
 
     def spin(dd, P, ss):
         x0, y0 = P(cx - R, cy - R)
         x1, y1 = P(cx + R, cy + R)
-        dd.arc((x0, y0, x1, y1), 0, 360, fill=50, width=int(9 * ss))
-        dd.arc((x0, y0, x1, y1), a0, a0 + 100, fill=255, width=int(9 * ss))
-    aa(img, CYAN, spin, box=(cx - R - 10, cy - R - 10, cx + R + 10, cy + R + 10))
-    d.text((LW / 2, 490), "Learning autonomously…", font=F(52, 720), fill=WHITE, anchor="ms")
-    d.text((LW / 2, 530), "Sit back. Your agent is catching up for you.", font=F(22, 450), fill=TXT2, anchor="ms")
-    stats = [("PAPERS READ", 1204 + t * 37), ("TUTORIALS WATCHED @16x", 388 + t * 11),
-             ("SKILLS FOUND", min(T.ROADMAP_TOTAL, int(T.ROADMAP_TOTAL * clamp((t + 1) / (E["notif_roadmap"] - B["dashboard_start"])) ** 0.8)))]
+        dd.arc((x0, y0, x1, y1), 0, 360, fill=50, width=int(11 * ss))
+        dd.arc((x0, y0, x1, y1), a0, a0 + 100, fill=255, width=int(11 * ss))
+    aa(img, CYAN, spin, box=(cx - R - 12, cy - R - 12, cx + R + 12, cy + R + 12))
+    d.text((LW / 2, 470), "Learning autonomously…", font=F(62, 760), fill=WHITE, anchor="ms")
+    d.text((LW / 2, 516), "Sit back. Your agent is catching up for you.", font=F(26, 500), fill=TXT2, anchor="ms")
+    found = int(T.ROADMAP_TOTAL * clamp((t + 1) / (E["notif_roadmap"] - E["dashboard_start"])) ** 0.8)
+    stats = [("PAPERS READ", 1204 + t * 37), ("TUTORIALS @16x", 388 + t * 11), ("SKILLS FOUND", min(T.ROADMAP_TOTAL, found))]
     for i, (lab, val) in enumerate(stats):
-        x0 = 160 + i * 330
-        fill_rr(img, (x0, 590, x0 + 300, 710), 16, (20, 25, 33))
-        ring_rr(img, (x0, 590, x0 + 300, 710), 16, 1, (40, 48, 62))
-        tracked(d, (x0 + 24, 626), lab, F(13, 750), TXT3, 1.5)
-        d.text((x0 + 24, 684), f"{val:,}", font=F(44, 780), fill=TXT, anchor="ls")
-    if f >= E["notif_roadmap"]:
-        im, pad = calm_toast()
-        age = f - E["notif_roadmap"]
-        tt = ease_out((age + 1) / 6)
-        x = LW - 18 - 720 + (1 - tt) * 780
-        paste_rgba(img, im, x - pad, 44 - pad, pop=0.4 if age == 0 else 0.15 if age == 1 else 0)
-        bx0, by0, bx1, by1 = open_button_box()
-        bx0 += (1 - tt) * 780
-        bx1 += (1 - tt) * 780
-        press = f >= E["roadmap_open"] - 2
-        fill_rr(img, (bx0, by0, bx1, by1), 25, (30, 110, 220) if press else BLUE)
-        d.text(((bx0 + bx1) / 2, (by0 + by1) / 2), "OPEN", font=F(22, 800), fill=WHITE, anchor="mm")
-        # the cursor drifts over and clicks
-        if f >= E["notif_roadmap"] + 3:
-            k = ease_out((f - E["notif_roadmap"] - 3) / 6)
-            mx, my = lerp(820, (bx0 + bx1) / 2 + 10, k), lerp(620, (by0 + by1) / 2 + 8, k)
-            cur = [(mx, my), (mx, my + 30), (mx + 8, my + 23), (mx + 14, my + 36), (mx + 19, my + 34),
-                   (mx + 13, my + 21), (mx + 23, my + 21)]
-            aa(img, BLACK, lambda dd, P, ss: dd.polygon([P(*p) for p in cur], fill=255, outline=255, width=int(3 * ss)),
-               box=(mx - 6, my - 6, mx + 32, my + 44))
-            aa(img, WHITE, lambda dd, P, ss: dd.polygon([P(*p) for p in cur], fill=255),
-               box=(mx - 6, my - 6, mx + 32, my + 44))
+        x0 = 110 + i * 360
+        fill_rr(img, (x0, 576, x0 + 340, 724), 20, (20, 25, 33))
+        ring_rr(img, (x0, 576, x0 + 340, 724), 20, 1.2, (40, 48, 62))
+        tracked(d, (x0 + 28, 618), lab, F(17, 780), TXT3, 1.8)
+        d.text((x0 + 28, 694), f"{val:,}", font=F(58, 800), fill=TXT, anchor="ls")
     return img
 
 
-# --- roadmap (411-491) --------------------------------------------------------
-RM_TOP = 316
-RM_ROW = 58
+@lru_cache(maxsize=1)
+def calm_card():
+    im, pad = card(CALM_W, CALM_H, (32, 42, 58), (22, 29, 41), AGENT, r=R_HERO, border=0.6, bw=2.2,
+                   blur=30, op=0.72, dy=16)
+    d = ImageDraw.Draw(im)
+    icon_tile(im, pad + 48, pad + 42, 76, (34, 170, 204), "route")
+    tracked(d, (pad + 144, pad + 90), "YOUR AGENT", F(22, 800), (140, 220, 240), 2.6)
+    d.text((pad + CALM_W - 48, pad + 90), "now", font=F(22, 500), fill=TXT2, anchor="rs")
+    lines = ["YOUR PERSONALIZED AI", "LEARNING ROADMAP", "IS READY."]
+    fnt = fit_lines(lines, CALM_W - 96, 68, 850)
+    lh = fnt.size * 1.12
+    for i, ln in enumerate(lines):
+        d.text((pad + 48, pad + 196 + i * lh), ln, font=fnt, fill=WHITE, anchor="ls")
+    d.text((pad + 48, pad + CALM_H - 52), f"{T.ROADMAP_TOTAL} skills · personalized for you", font=F(24, 550),
+           fill=TXT2, anchor="ls")
+    open_button(im, pad, "idle")
+    return im, pad
+
+
+def open_button(img, ox, state, oy=None):
+    """Draw OPEN at card-local OPEN_BTN offset by (ox, oy): idle / hover / pressed."""
+    oy = ox if oy is None else oy
+    x0, y0, x1, y1 = OPEN_BTN
+    inset = 4 if state == "pressed" else 0
+    col = {"idle": CYAN, "hover": (150, 240, 255), "pressed": (20, 150, 180)}[state]
+    box = (ox + x0 + inset, oy + y0 + inset, ox + x1 - inset, oy + y1 - inset)
+    if isinstance(img, Image.Image) and img.mode == "RGBA":
+        lay = Image.new("RGBA", (int(box[2] - box[0]), int(box[3] - box[1])), col + (255,))
+        lay.putalpha(rr_mask(lay.width, lay.height, 22))
+        img.alpha_composite(lay, (int(box[0]), int(box[1])))
+    else:
+        fill_rr(img, box, 22, col)
+    ImageDraw.Draw(img).text(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2 + 1), "OPEN", font=F(36, 850),
+                             fill=(4, 30, 40), anchor="mm")
+
+
+def lap_dashboard(f):
+    img = dash_base(f)
+    if f < E["notif_roadmap"]:
+        return img
+    age = f - E["notif_roadmap"]
+    k = enter_k(age)
+    img = focus(img, 0.88 * k, blur=12, keep=0.34)
+    im, pad = calm_card()
+    place_c(img, im, CALM_C[0], CALM_C[1], k, dy=46, scale0=0.95)
+    if k < 0.999:
+        return img
+    ox, oy = CALM_C[0] - CALM_W / 2, CALM_C[1] - CALM_H / 2
+    bx0, by0, bx1, by1 = OPEN_BTN
+    tip = (ox + (bx0 + bx1) / 2 + 14, oy + (by0 + by1) / 2 + 8)
+    if f >= CLICK:
+        open_button(img, ox, "pressed", oy)
+        r = 14 + 34 * ease_out((f - CLICK + 1) / 3)
+        a = 0.85 * (1 - clamp((f - CLICK) / 3))
+        if a > 0.01:
+            aa(img, WHITE, lambda dd, P, ss: dd.ellipse((*P(tip[0] - r, tip[1] - r), *P(tip[0] + r, tip[1] + r)),
+                                                        outline=255, width=int(4 * ss)),
+               box=(tip[0] - 60, tip[1] - 60, tip[0] + 60, tip[1] + 60), alpha=a)
+    elif f >= CLICK - 1:
+        open_button(img, ox, "hover", oy)
+    if f >= CURSOR_IN:
+        u = smooth((f - CURSOR_IN) / (CLICK - 1 - CURSOR_IN))
+        start = (LW - 40, LH + 10)
+        mx = lerp(start[0], tip[0], u) + math.sin(u * math.pi) * 40
+        my = lerp(start[1], tip[1], u) + (2 if f >= CLICK else 0)
+        draw_cursor(img, mx, my)
+    return img
+
+
+# --- roadmap (roadmap_open .. notif_obsolete) ---------------------------------
+RM_HEAD = 380
+RM_ROW = 72
 
 
 @lru_cache(maxsize=1)
@@ -1623,112 +1660,166 @@ def roadmap_items():
 def roadmap_scroll_table():
     """Scroll offset (px) per frame: integrate a velocity that follows the speed channel."""
     a, b = E["scroll_start"], E["notif_obsolete"] - 1
-    vis_rows = (LH - RM_TOP) / RM_ROW
-    target_top = 772
-    raw = {}
-    acc = 0.0
+    raw, acc = {}, 0.0
     for f in range(a, b + 1):
-        ramp = clamp((f - a + 1) / 6)
-        acc += (spd(f) ** 2.1) * ramp
+        acc += (spd(f) ** 2.1) * clamp((f - a + 1) / 6)
         raw[f] = acc
-    k = (target_top * RM_ROW) / acc
-    table, vel = {}, {}
-    prev = 0.0
+    k = (760 * RM_ROW) / acc                          # ~760 rows by the time it goes obsolete
+    table, vel, prev = {}, {}, 0.0
     for f in range(E["roadmap_open"], b + 2):
         v = raw.get(min(f, b), 0.0) * k if f >= a else 0.0
-        table[f] = v
-        vel[f] = v - prev
-        prev = v
-    return table, vel, vis_rows
+        table[f], vel[f], prev = v, v - prev, v
+    return table, vel
 
 
 @lru_cache(maxsize=1)
 def roadmap_header():
-    img = Image.new("RGB", (LW, RM_TOP), (12, 15, 21))
+    img = Image.new("RGB", (LW, RM_HEAD), (12, 15, 21))
     d = ImageDraw.Draw(img)
-    menubar(img, 1, app="Roadmap", bell=None)  # clock is redrawn per frame
-    tracked(d, (60, 78), "YOUR AI LEARNING ROADMAP", F(24, 800), (140, 178, 255), 3.2)
-    d.text((LW - 60, 78), "generated for you  ·  847 skills  ·  est. 41,300 h", font=F(17, 500), fill=TXT3, anchor="rs")
-    big = F(150, 850)
-    d.text((54, 236), "0 / 847", font=big, fill=WHITE, anchor="ls")
-    x = 54 + big.getlength("0 / 847") + 34
-    d.text((x, 236), "SKILLS MASTERED", font=fit("SKILLS MASTERED", LW - 60 - x, 64, 850), fill=WHITE, anchor="ls")
-    fill_rr(img, (60, 268, LW - 140, 286), 9, (34, 40, 52))
-    fill_rr(img, (60, 268, 70, 286), 5, (60, 70, 90))
-    d.text((LW - 60, 286), "0%", font=F(30, 800), fill=WHITE, anchor="rs")
-    fill_rect(img, (0, RM_TOP - 1, LW, RM_TOP), LINE)
+    tracked(d, (56, 62), "YOUR AI LEARNING ROADMAP", F(26, 820), (150, 186, 255), 3.4)
+    num, lab = f"0 / {T.ROADMAP_TOTAL}", ("SKILLS", "MASTERED")
+    big = F(212, 880)
+    nw = big.getlength(num)
+    small = fit_lines(list(lab), LW - 56 - 56 - nw - 44, 84, 860, 40)
+    d.text((48, 290), num, font=big, fill=WHITE, anchor="ls")
+    x = 48 + nw + 44
+    d.text((x, 290 - small.size * 1.0), lab[0], font=small, fill=WHITE, anchor="ls")
+    d.text((x, 290), lab[1], font=small, fill=WHITE, anchor="ls")
+    fill_rr(img, (56, 318, LW - 150, 346), 14, (36, 42, 56))
+    fill_rr(img, (56, 318, 72, 346), 8, (70, 80, 100))
+    d.text((LW - 56, 346), "0%", font=F(44, 850), fill=WHITE, anchor="rs")
+    fill_rect(img, (0, RM_HEAD - 2, LW, RM_HEAD), LINE)
     return img
 
 
 def roadmap_list(scroll, vel):
-    """Render the list viewport (LW x LH-RM_TOP) at a given scroll offset."""
+    """The list viewport (LW x LH-RM_HEAD) at a given scroll offset, with speed blur."""
     items, tags = roadmap_items()
-    h = LH - RM_TOP
+    h = LH - RM_HEAD
     img = Image.new("RGB", (LW, h), (16, 19, 26))
     d = ImageDraw.Draw(img)
     first = int(scroll // RM_ROW)
     off = scroll - first * RM_ROW
-    fnum, fname, ftag = F(22, 600), F(28, 600), F(14, 750)
+    fnum, fname, ftag = F(24, 650), F(32, 620), F(18, 780)
     for k in range(int(h / RM_ROW) + 2):
         i = first + k
         if i >= len(items):
             break
         y = k * RM_ROW - off
+        cy = y + RM_ROW / 2
         if i % 2 == 0:
-            fill_rect(img, (0, y, LW, y + RM_ROW), (19, 23, 31))
-        d.text((112, y + RM_ROW / 2), f"{i + 1}.", font=fnum, fill=TXT3, anchor="rm")
-        ring_rr(img, (134, y + 15, 162, y + 43), 6, 2.2, (120, 132, 156))
-        d.text((184, y + RM_ROW / 2 + 1), items[i], font=fname, fill=TXT, anchor="lm")
+            fill_rect(img, (0, y, LW, y + RM_ROW), (20, 24, 32))
+        d.text((118, cy), f"{i + 1}.", font=fnum, fill=TXT3, anchor="rm")
+        ring_rr(img, (138, cy - 17, 172, cy + 17), 8, 2.6, (128, 140, 164))
+        d.text((196, cy + 1), ellipsize(items[i], fname, 760), font=fname, fill=TXT, anchor="lm")
         tg = tags[i]
-        col = {"NEW": GREEN, "UPDATED": BLUE, "DEPRECATED?": AMBER}.get(tg, TXT3)
-        tw = ftag.getlength(tg) + 22
         if tg.startswith("est."):
-            d.text((LW - 70, y + RM_ROW / 2), tg, font=F(16, 500), fill=TXT3, anchor="rm")
+            d.text((LW - 72, cy), tg, font=F(21, 550), fill=TXT3, anchor="rm")
         else:
-            fill_rr(img, (LW - 70 - tw, y + 17, LW - 70, y + 41), 6, mix(col, (16, 19, 26), 0.75))
-            d.text((LW - 70 - tw / 2, y + RM_ROW / 2), tg, font=ftag, fill=col, anchor="mm")
+            col = {"NEW": GREEN, "UPDATED": BLUE, "DEPRECATED?": AMBER}[tg]
+            tw = ftag.getlength(tg) + 26
+            fill_rr(img, (LW - 72 - tw, cy - 15, LW - 72, cy + 15), 8, mix(col, (16, 19, 26), 0.75))
+            d.text((LW - 72 - tw / 2, cy), tg, font=ftag, fill=col, anchor="mm")
     if vel > 6:
         sharp = np.asarray(img, np.float32)
-        arr = vblur_arr(sharp, min(vel * 0.8, 150))
+        blur = vblur_arr(sharp, min(vel * 0.8, 150))
         k = clamp((vel - 6) / 120) * 0.7
-        img = Image.fromarray((sharp * (1 - k) + arr * k).clip(0, 255).astype(np.uint8))
-    # scrollbar (tiny thumb)
+        img = Image.fromarray((sharp * (1 - k) + blur * k).clip(0, 255).astype(np.uint8))
     total_h = len(items) * RM_ROW
-    track = (LW - 26, 10, LW - 18, h - 10)
-    fill_rr(img, track, 4, (34, 40, 52))
-    th = max(7, (track[3] - track[1]) * h / total_h)
+    track = (LW - 30, 12, LW - 20, h - 12)
+    fill_rr(img, track, 5, (34, 40, 52))
+    th = max(10, (track[3] - track[1]) * h / total_h)
     ty = track[1] + (track[3] - track[1] - th) * clamp(scroll / (total_h - h))
-    fill_rr(img, (track[0] - 1, ty, track[2] + 1, ty + th), 4, (190, 200, 220))
+    fill_rr(img, (track[0] - 1, ty, track[2] + 1, ty + th), 5, (190, 200, 220))
     return img, ty
 
 
-def lap_roadmap(f, freeze=False):
-    table, vel, _ = roadmap_scroll_table()
+@lru_cache(maxsize=1)
+def print_feed_table():
+    """Paper fed per frame (px) from print_start; shared by the monitor and the laptop chip."""
+    tab, vel, acc = {}, {}, 0.0
+    for f in range(E["print_start"], E["notif_obsolete"] + 1):
+        v = 4 + 1250 * spd(f) ** 2.2 if f >= E["print_start"] + 2 else 0.0
+        acc += v
+        tab[f], vel[f] = acc, v
+    return tab, vel
+
+
+PRINT_ROW = 40
+PRINT_ROWS_PAGE = 26
+PRINT_PAGE_H = PRINT_ROW * PRINT_ROWS_PAGE
+
+
+def print_page(f):
+    tab, _ = print_feed_table()
+    ff = max(E["print_start"], min(f, E["notif_obsolete"] - 1))
+    return int(tab.get(ff, 0.0) // PRINT_PAGE_H) + 1
+
+
+@lru_cache(maxsize=64)
+def print_chip(page):
+    fnt, fnt2 = F(24, 800), F(24, 650)
+    t1, t2 = "PRINTING…", f"page {page} of ∞"
+    w = int(fnt.getlength(t1) + fnt2.getlength(t2)) + 104
+    im, pad = card(w, 52, (30, 38, 52), (24, 30, 42), AGENT, r=26, border=0.55, bw=1.6, blur=8, op=0.5, dy=4)
+    d = ImageDraw.Draw(im)
+    im.alpha_composite(icon_layer("paper", 26, AGENT), (pad + 20, pad + 13))
+    d.text((pad + 58, pad + 27), t1, font=fnt, fill=WHITE, anchor="lm")
+    d.text((pad + 58 + fnt.getlength(t1) + 14, pad + 27), t2, font=fnt2, fill=AGENT, anchor="lm")
+    return im, pad
+
+
+def roadmap_view(f, freeze=False):
+    table, vel = roadmap_scroll_table()
     ff = min(f, E["notif_obsolete"] - 1)
     sc = table.get(ff, 0.0)
-    v = 0.0 if freeze else vel.get(ff, 0.0)
     img = Image.new("RGB", (LW, LH))
     img.paste(roadmap_header(), (0, 0))
-    menubar(img, f, app="Roadmap", bell=None)
-    lst, ty = roadmap_list(sc, v)
-    img.paste(lst, (0, RM_TOP))
+    lst, ty = roadmap_list(sc, 0.0 if freeze else vel.get(ff, 0.0))
+    img.paste(lst, (0, RM_HEAD))
+    d = ImageDraw.Draw(img)
     if not freeze and f >= E["scroll_start"]:
-        items, _ = roadmap_items()
-        cur = int(sc // RM_ROW) + 1
-        lab = f"#{cur} / {len(items)}"
-        fnt = F(20, 800)
-        w = fnt.getlength(lab) + 28
-        y = RM_TOP + ty - 8
-        fill_rr(img, (LW - 40 - w, y, LW - 40, y + 34), 17, (40, 48, 64))
-        ImageDraw.Draw(img).text((LW - 40 - w / 2, y + 17), lab, font=fnt, fill=WHITE, anchor="mm")
+        lab = f"#{int(sc // RM_ROW) + 1} / {T.ROADMAP_TOTAL}"
+        fnt = F(24, 800)
+        w = fnt.getlength(lab) + 32
+        y = RM_HEAD + ty - 10
+        fill_rr(img, (LW - 46 - w, y, LW - 46, y + 40), 20, (44, 52, 70))
+        d.text((LW - 46 - w / 2, y + 20), lab, font=fnt, fill=WHITE, anchor="mm")
+    if f >= E["print_start"]:
+        im, pad = print_chip(print_page(ff))
+        w = im.width - 2 * pad
+        place_c(img, im, LW - 40 - w / 2, 54, enter_k(f - E["print_start"]), dy=-24)
     return img
 
 
-# --- ROADMAP OBSOLETE (492-518) ----------------------------------------------
 @lru_cache(maxsize=1)
-def obsolete_base():
-    img = lap_roadmap(E["notif_obsolete"] - 1, freeze=True)
-    return dim(gray(img), 0.42)
+def roadmap_from():
+    return lap_dashboard(E["roadmap_open"] - 1)
+
+
+def lap_roadmap(f):
+    img = roadmap_view(f)
+    age = f - E["roadmap_open"]
+    if age < 5:                                      # opens with an eased slide + fade, then holds still
+        k = enter_k(age, 5)
+        shift = int(round((1 - k) * 30))
+        moved = roadmap_from().copy()
+        moved.paste(img.crop((0, 0, LW, LH - shift)), (0, shift))
+        return Image.blend(roadmap_from(), moved, min(1.0, k * 1.6))
+    return img
+
+
+# --- NEW RELEASE. ROADMAP OBSOLETE. (notif_obsolete .. close_laptop) -----------
+OBS_BAND = (372, 790)
+
+
+@lru_cache(maxsize=1)
+def obsolete_back():
+    img = dim(gray(roadmap_view(E["notif_obsolete"] - 1, freeze=True)), 0.42)
+    yy, xx = np.mgrid[0:LH, 0:LW].astype(np.float32)
+    v = np.clip(np.sqrt(((xx - LW / 2) / LW) ** 2 + ((yy - LH / 2) / LH) ** 2) * 1.6 - 0.25, 0, 1)[..., None]
+    arr = np.asarray(img, np.float32) * (1 - 0.35 * v) + v * np.array([60, 0, 4], np.float32) * 0.6
+    return Image.fromarray(arr.clip(0, 255).astype(np.uint8))
 
 
 @lru_cache(maxsize=1)
@@ -1739,77 +1830,104 @@ def stamp_img():
     h = 230
     m = Image.new("L", (w, h), 0)
     d = ImageDraw.Draw(m)
-    d.rounded_rectangle((8, 8, w - 8, h - 8), radius=22, outline=255, width=14)
+    d.rounded_rectangle((8, 8, w - 8, h - 8), radius=24, outline=255, width=16)
     d.text((w / 2, h / 2 + 6), txt, font=fnt, fill=255, anchor="mm")
     rng = np.random.default_rng(492)
-    noise = rng.random((h // 3 + 1, w // 3 + 1))
-    noise = np.kron(noise, np.ones((3, 3)))[:h, :w]
-    arr = np.asarray(m, np.float32) * (0.55 + 0.45 * (noise > 0.22))
-    m = Image.fromarray(arr.astype(np.uint8)).rotate(14, expand=True, resample=Image.BICUBIC)
-    im = Image.new("RGBA", m.size, (226, 48, 52, 0))
+    noise = np.kron(rng.random((h // 3 + 1, w // 3 + 1)), np.ones((3, 3)))[:h, :w]
+    arr = np.asarray(m, np.float32) * (0.62 + 0.38 * (noise > 0.2))
+    m = Image.fromarray(arr.astype(np.uint8)).rotate(9, expand=True, resample=Image.BICUBIC)
+    im = Image.new("RGBA", m.size, (238, 56, 60, 0))
     im.putalpha(m)
     return im
 
 
 @lru_cache(maxsize=1)
-def obsolete_card():
-    w, h = 940, 268
-    pad = 50
-    im = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
-    sm, spad = _shadow(w, h, 26, 24)
-    sh = Image.new("RGBA", sm.size, (0, 0, 0, 0))
-    sh.putalpha(scale_mask(sm, 0.8))
-    im.alpha_composite(sh, (pad - spad, pad - spad + 14))
-    body = Image.new("RGBA", (w, h))
-    body.paste(vgrad(w, h, (238, 44, 50), (196, 22, 32)), (0, 0))
-    body.putalpha(rr_mask(w, h, 26))
-    im.alpha_composite(body, (pad, pad))
-    border = Image.new("RGBA", (w, h), (255, 200, 200, 0))
-    border.putalpha(scale_mask(rr_ring(w, h, 26, 2.5), 0.8))
-    im.alpha_composite(border, (pad, pad))
-    d = ImageDraw.Draw(im)
-    ic = Image.new("RGBA", (34, 34), (255, 255, 255, 255))
-    ic.putalpha(icon_mask("warn", 34))
-    im.alpha_composite(ic, (pad + 36, pad + 26))
-    tracked(d, (pad + 82, pad + 53), "RELEASE ALERT", F(19, 800), (255, 222, 222), 2.4)
-    d.text((pad + w - 36, pad + 53), "now", font=F(19, 500), fill=(255, 215, 215), anchor="rs")
-    d.text((pad + w / 2, pad + 134), "NEW RELEASE.", font=F(76, 900), fill=WHITE, anchor="mm")
-    t2 = "ROADMAP OBSOLETE."
-    d.text((pad + w / 2, pad + 214), t2, font=fit(t2, w - 80, 70, 850), fill=WHITE, anchor="mm")
-    return im, pad
+def obsolete_band():
+    y0, y1 = OBS_BAND
+    h = y1 - y0
+    band = Image.new("RGBA", (LW, h + 40), (0, 0, 0, 0))
+    sh = Image.new("L", (LW, h + 40), 0)
+    ImageDraw.Draw(sh).rectangle((0, 20, LW, h + 20), fill=150)
+    band.putalpha(sh.filter(ImageFilter.GaussianBlur(14)))
+    body = vgrad(LW, h, (236, 40, 48), (188, 18, 28)).convert("RGBA")
+    band.alpha_composite(body, (0, 20))
+    d = ImageDraw.Draw(band)
+    fill = Image.new("RGBA", (LW, 4), (255, 200, 200, 255))
+    band.alpha_composite(fill, (0, 20))
+    band.alpha_composite(fill, (0, 20 + h - 4))
+    band.alpha_composite(icon_layer("warn", 40, WHITE), (60, 20 + 34))
+    tracked(d, (116, 20 + 68), "RELEASE ALERT", F(26, 820), (255, 226, 226), 3.4)
+    d.text((LW - 60, 20 + 68), "now", font=F(26, 500), fill=(255, 215, 215), anchor="rs")
+    t1, t2 = "NEW RELEASE.", "ROADMAP OBSOLETE."
+    f1 = fit(t1, LW - 110, 150, 900)
+    f2 = fit(t2, LW - 110, 128, 900)
+    d.text((LW / 2, 20 + 226), t1, font=f1, fill=WHITE, anchor="ms")
+    d.text((LW / 2, 20 + 362), t2, font=f2, fill=WHITE, anchor="ms")
+    return band
+
+
+def obsolete_frame(age):
+    img = obsolete_back().copy()
+    st = stamp_img()
+    a = min(age, 2)                                   # 3-frame entrance, then perfectly still
+    sc = [1.45, 1.12, 1.0][a]
+    s2 = st.resize((int(st.width * sc), int(st.height * sc)), Image.BICUBIC) if sc != 1.0 else st
+    paste_rgba(img, s2, LW / 2 - s2.width / 2, 196 - s2.height / 2, opacity=[0.55, 0.9, 0.95][a])
+    band = obsolete_band()
+    paste_rgba(img, band, 0, OBS_BAND[0] - 20 + [70, 14, 0][a], opacity=[0.7, 1.0, 1.0][a])
+    if a < 2:
+        img = Image.blend(img, Image.new("RGB", img.size, WHITE), [0.3, 0.1][a])
+    return img
 
 
 def lap_obsolete(f):
-    img = obsolete_base().copy()
-    age = f - E["notif_obsolete"]
-    st = stamp_img()
-    sa = age - 2
-    if sa >= 0:
-        sc = lerp(1.5, 1.0, ease_in((sa + 1) / 3)) if sa < 3 else 1.0
-        s2 = st.resize((int(st.width * sc), int(st.height * sc)), Image.BILINEAR) if sc != 1.0 else st
-        paste_rgba(img, s2, 640 - s2.width / 2, 190 - s2.height / 2, opacity=0.92 * clamp((sa + 1) / 2))
-    im, pad = obsolete_card()
-    sc = lerp(0.88, 1.0, ease_out_back((age + 1) / 4, 1.3)) if age < 4 else 1.0
-    if sc != 1.0:
-        im = im.resize((int(im.width * sc), int(im.height * sc)), Image.BILINEAR)
-    paste_rgba(img, im, (LW - im.width) / 2, 520 - im.height / 2, opacity=clamp((age + 1) / 2),
-               pop=0.35 if age == 0 else 0.0)
-    menubar(img, f, app="Roadmap", bell=None, alpha=0.7)
+    return obsolete_frame(f - E["notif_obsolete"])
+
+
+# --- the lid reopens: frantic (yank+5 .. black) --------------------------------
+@lru_cache(maxsize=1)
+def frantic_banner():
+    h = 124
+    band = Image.new("RGBA", (LW, h + 30), (0, 0, 0, 0))
+    sh = Image.new("L", (LW, h + 30), 0)
+    ImageDraw.Draw(sh).rectangle((0, 15, LW, h + 15), fill=170)
+    band.putalpha(sh.filter(ImageFilter.GaussianBlur(10)))
+    band.alpha_composite(vgrad(LW, h, (236, 40, 48), (190, 18, 28)).convert("RGBA"), (0, 15))
+    d = ImageDraw.Draw(band)
+    band.alpha_composite(icon_layer("bolt", 52, WHITE), (40, 15 + 36))
+    txt = "NEW MODEL RELEASED · 10X FASTER"
+    d.text((LW / 2 + 30, 15 + h / 2 + 2), txt, font=fit(txt, LW - 160, 66, 880), fill=WHITE, anchor="mm")
+    return band
+
+
+def lap_frantic(f):
+    age = f - B["reopen"]
+    ph = 30.0 + age * 1.6
+    idx = int(ph)
+    img = smear_stack(tut_slide(idx).copy(), idx, 1.0, trail=((0.3, -70), (0.22, -150), (0.14, -240), (0.08, -340)))
+    tut_overlays(img, f, ph, 1.0)
+    img = glitch(img, frng("frantic", f), n=10, maxshift=180, split=10)     # deliberate: the video can't keep up
+    draw_badge(img, "32x", True, age)
+    band = frantic_banner()
+    k = enter_k(age, 4)
+    paste_rgba(img, band, 0, LH - 168 - 15 + (1 - k) * 120, opacity=min(1.0, k * 1.3))
     return img
 
 
 def laptop_frame(f):
-    if f >= E["close_laptop"]:
+    if E["close_laptop"] <= f < B["reopen"] or f >= E["black"]:
         return Image.new("RGB", (LW, LH), BLACK)
+    if f >= B["reopen"]:
+        return lap_frantic(f)
     if f < E["tutorial_2x"]:
         return lap_course(f)
     if f < E["notif_do_that"]:
         return lap_tutorial(f)
     if f < E["notif_better"]:
         return lap_hero(f)
-    if f < B["builder_start"]:
+    if f < E["builder_start"]:
         return lap_takeover(f)
-    if f < B["dashboard_start"]:
+    if f < E["dashboard_start"]:
         return lap_builder(f)
     if f < E["roadmap_open"]:
         return lap_dashboard(f)
@@ -1925,11 +2043,11 @@ def mon_reader_base():
     wb = (1034, 590, 1576, 884)
     drop_shadow(img, wb, 16, blur=18, opacity=0.5)
     fill_rr(img, wb, 16, (24, 27, 34))
-    tracked(d, (1064, 638), "TODAY'S GOAL", F(15, 800), (130, 170, 235), 2.2)
-    ring_rr(img, (1064, 680, 1112, 728), 10, 3, (140, 150, 170))
-    d.text((1136, 704), "Learn AI.", font=F(52, 780), fill=WHITE, anchor="lm")
-    d.text((1064, 790), "Day 1 · plenty of time", font=F(19, 500), fill=TXT2, anchor="ls")
-    d.text((1064, 830), "Next: take it slow.", font=F(19, 500), fill=TXT3, anchor="ls")
+    tracked(d, (1064, 640), "TODAY'S GOAL", F(20, 820), (130, 170, 235), 2.6)
+    ring_rr(img, (1064, 676, 1120, 732), 12, 3.5, (140, 150, 170))
+    d.text((1142, 706), "Learn AI.", font=F(76, 800), fill=WHITE, anchor="lm")
+    d.text((1064, 800), "Day 1 · plenty of time", font=F(26, 550), fill=TXT2, anchor="ls")
+    d.text((1064, 846), "Next: take it slow.", font=F(26, 550), fill=TXT3, anchor="ls")
     return img
 
 
@@ -2112,34 +2230,31 @@ def term_table():
 
 def draw_terminal(img, box, f):
     x0, y0, x1, y1 = box
-    top = draw_window(img, box, "terminal — learn_ai", body=(12, 13, 16), bar=(22, 23, 28))
+    top = draw_window(img, box, "terminal — learn_ai", body=(12, 13, 16), bar=(22, 23, 28), sc=1.15)
     d = ImageDraw.Draw(img)
     lines, table, names, vers, _ = term_table()
     n, prog, pi, _ = table[min(f, E["notif_do_that"] - 1)]
-    fm = MONO(17)
-    lh = 24
-    cur = [(f"installing {names[pi]} {vers[pi]} …", TXT)]
-    blocks = int(prog * 20)
-    bar = "█" * blocks + "░" * (20 - blocks)
-    cur.append((f"[{bar}] {int(prog * 100):3d}%", CYAN))
-    shown = lines[:n] + cur
-    maxl = int((y1 - top - 20) / lh)
-    shown = shown[-maxl:]
+    fm = MONO(20)
+    lh = 29
+    blocks = int(prog * 16)
+    cur = [(f"installing {names[pi]} {vers[pi]} …", TXT),
+           (f"[{'█' * blocks}{'░' * (16 - blocks)}] {int(prog * 100):3d}%", CYAN)]
+    shown = (lines[:n] + cur)[-int((y1 - top - 20) / lh):]
     for i, (t, col) in enumerate(shown):
-        d.text((x0 + 18, top + 22 + i * lh), ellipsize(t, fm, x1 - x0 - 30), font=fm, fill=col, anchor="lm")
+        d.text((x0 + 20, top + 24 + i * lh), ellipsize(t, fm, x1 - x0 - 34), font=fm, fill=col, anchor="lm")
 
 
 def draw_bench(img, box, f):
     x0, y0, x1, y1 = box
-    fill_rr(img, box, 12, (20, 22, 28))
-    ring_rr(img, box, 12, 1, (40, 44, 54))
+    fill_rr(img, box, 14, (20, 22, 28))
+    ring_rr(img, box, 14, 1.2, (40, 44, 54))
     d = ImageDraw.Draw(img)
-    tracked(d, (x0 + 22, y0 + 34), "LEADERBOARD", F(14, 800), TXT2, 2)
-    d.text((x1 - 22, y0 + 34), "avg score ↑", font=F(14, 500), fill=TXT3, anchor="rs")
+    tracked(d, (x0 + 24, y0 + 40), "LEADERBOARD", F(19, 820), TXT2, 2.4)
+    d.text((x1 - 24, y0 + 40), "score ↑", font=F(19, 550), fill=TXT3, anchor="rs")
     _, table, _, _, bars = term_table()
     nb = table[min(f, E["notif_do_that"] - 1)][3]
     hist = [(None, 1.0 / 1.42 ** k) for k in range(4, 0, -1)] + bars[:nb]
-    vis = hist[-8:]
+    vis = hist[-7:]
     if not vis:
         return
     last_f = vis[-1][0]
@@ -2147,7 +2262,7 @@ def draw_bench(img, box, f):
     hmax_new = vis[-1][1]
     hmax_old = max(v[1] for v in vis[:-1]) if len(vis) > 1 else hmax_new
     hmax = lerp(hmax_old, hmax_new, grow) * 1.08
-    gx0, gx1, gy0, gy1 = x0 + 30, x1 - 26, y0 + 56, y1 - 40
+    gx0, gx1, gy0, gy1 = x0 + 30, x1 - 26, y0 + 64, y1 - 46
     for k in range(4):
         gy = gy1 - (gy1 - gy0) * k / 3
         fill_rect(img, (gx0, gy, gx1, gy + 1), (36, 40, 50))
@@ -2155,10 +2270,20 @@ def draw_bench(img, box, f):
     for i, (bf, h) in enumerate(vis):
         newest = i == len(vis) - 1
         hh = (gy1 - gy0) * h / hmax * (grow if newest else 1.0)
-        bx = gx0 + i * bw + bw * 0.18
-        fill_rr(img, (bx, gy1 - max(3, hh), bx + bw * 0.64, gy1), 4, RED if newest else (70, 110, 190) if i >= len(vis) - 3 else (60, 66, 82))
+        bx = gx0 + i * bw + bw * 0.16
+        fill_rr(img, (bx, gy1 - max(4, hh), bx + bw * 0.68, gy1), 5,
+                RED if newest else (70, 110, 190) if i >= len(vis) - 3 else (60, 66, 82))
         lab = "NEW" if newest else f"m{len(hist) - len(vis) + i + 1}"
-        d.text((bx + bw * 0.32, gy1 + 20), lab, font=F(13, 800 if newest else 500), fill=RED if newest else TXT3, anchor="mm")
+        d.text((bx + bw * 0.34, gy1 + 24), lab, font=F(17, 820 if newest else 550), fill=RED if newest else TXT3, anchor="mm")
+
+
+@lru_cache(maxsize=16)
+def mon_popup(text):
+    w, h = 400, 88
+    im, pad = card(w, h, (40, 44, 56), (32, 35, 45), WARN, r=18, border=0.6, bw=1.6, blur=14, op=0.6, dy=8)
+    icon_tile(im, pad + 16, pad + 16, 56, WARN, "warn", fg=(40, 26, 0))
+    ImageDraw.Draw(im).text((pad + 90, pad + h / 2 + 1), text, font=fit(text, w - 110, 28, 760, 18), fill=WHITE, anchor="lm")
+    return im, pad
 
 
 def mon_code(f):
@@ -2169,61 +2294,51 @@ def mon_code(f):
     nfl = phase * 1.7
     L = int(nfl)
     ver = min(len(VERSIONS) - 1, int(nfl / 11))
-    # editor
     ex0, ex1 = 0, 960
-    draw_editor_tabs(img, (ex0, MMENU, ex1, MMENU + 40), VERSIONS[:ver + 1], ver)
-    fill_rect(img, (ex0, MMENU + 40, ex1, MMENU + 66), (24, 25, 31))
-    d.text((ex0 + 16, MMENU + 53), f"learn_ai  ›  {VERSIONS[ver]}  ›  LearningAgent", font=F(13, 500), fill=TXT3, anchor="lm")
-    fm = MONO(17)
+    draw_editor_tabs(img, (ex0, MMENU, ex1, MMENU + 46), VERSIONS[:ver + 1], ver, big=True)
+    fm = MONO(20)
     cw = fm.getlength("M")
-    lh = 22
-    cy0 = MMENU + 78
-    vis = int((MH - 30 - cy0) / lh)
+    lh = 27
+    cy0 = MMENU + 64
+    vis = int((MH - 36 - cy0) / lh)
     top = max(0, L - vis + 4)
-    fill_rect(img, (ex0, cy0 - 8, ex0 + 62, MH - 30), (17, 18, 23))
+    fill_rect(img, (ex0, cy0 - 10, ex0 + 70, MH - 36), (17, 18, 23))
     for i in range(vis):
         li = top + i
         if li > L:
             break
         y = cy0 + i * lh + lh / 2
         line = corp[li % len(corp)]
-        d.text((ex0 + 50, y), str(li + 1), font=MONO(14), fill=TXT3 if li != L else TXT, anchor="rm")
+        d.text((ex0 + 58, y), str(li + 1), font=MONO(16), fill=TXT3 if li != L else TXT, anchor="rm")
         if li == L:
-            fill_rect(img, (ex0 + 62, y - lh / 2, ex1, y + lh / 2), (28, 31, 40))
+            fill_rect(img, (ex0 + 70, y - lh / 2, ex1, y + lh / 2), (28, 31, 40))
             n = int((nfl - L) * len(line))
-            draw_code_line(d, ex0 + 76, y, line, fm, cw, max_chars=n, anchor="lm")
-            fill_rect(img, (ex0 + 76 + n * cw, y - 10, ex0 + 78 + n * cw, y + 10), WHITE)
+            draw_code_line(d, ex0 + 84, y, line, fm, cw, max_chars=n, anchor="lm")
+            fill_rect(img, (ex0 + 84 + n * cw, y - 12, ex0 + 87 + n * cw, y + 12), WHITE)
         else:
-            draw_code_line(d, ex0 + 76, y, line, fm, cw, anchor="lm")
+            draw_code_line(d, ex0 + 84, y, line, fm, cw, anchor="lm")
     warn = int(chv("stress", f) * 180)
-    fill_rect(img, (ex0, MH - 30, ex1, MH), (36, 84, 190))
-    d.text((ex0 + 14, MH - 15), f"Ln {L + 1}, Col {int((nfl - L) * 40) + 1}   ·   Python   ·   ⚠ {warn}", font=F(14, 600), fill=WHITE, anchor="lm")
-    d.text((ex1 - 14, MH - 15), "agentflow 0.1  (deprecated)", font=F(14, 600), fill=(255, 220, 160), anchor="rm")
+    fill_rect(img, (ex0, MH - 36, ex1, MH), (36, 84, 190))
+    d.text((ex0 + 16, MH - 18), f"Ln {L + 1}   ·   ⚠ {warn} warnings", font=F(18, 650), fill=WHITE, anchor="lm")
+    d.text((ex1 - 16, MH - 18), "agentflow 0.1 (deprecated)", font=F(18, 650), fill=(255, 222, 165), anchor="rm")
     fill_rect(img, (ex1, MMENU, ex1 + 1, MH), LINE)
     draw_terminal(img, (972, MMENU + 10, 1590, 560), f)
     draw_bench(img, (972, 574, 1590, 890), f)
-    # chaos: update popups pile up with speed
+    # update popups pile up with speed (big, at most four)
     s = spd(f)
-    rng = frng("monpop", f // 3)
-    for k in range(int(max(0, s - 0.5) * 10)):
+    for k in range(min(4, int(max(0, s - 0.5) * 10))):
         r2 = frng("monpopk", k)
-        bx = 140 + r2.randint(0, 520)
-        by = 160 + r2.randint(0, 520)
-        fill_rr(img, (bx, by, bx + 300, by + 64), 10, (36, 40, 52))
-        ring_rr(img, (bx, by, bx + 300, by + 64), 10, 1, (80, 90, 110))
-        icon(img, "warn", bx + 14, by + 20, 24, AMBER)
-        d.text((bx + 50, by + 32), r2.choice(["Update available", "New version!", "Restart required",
-                                              "Breaking change", "Docs updated"]), font=F(18, 700), fill=WHITE, anchor="lm")
-    _ = rng
+        im, pad = mon_popup(r2.choice(["Update available", "New version!", "Restart required",
+                                       "Breaking change", "Docs updated"]))
+        paste_rgba(img, im, 120 + k * 120 + r2.randint(0, 60) - pad, 170 + k * 130 + r2.randint(0, 40) - pad)
     menubar(img, f, sc=MSC, app="Code")
     return img
 
 
 @lru_cache(maxsize=1)
-def mon_final():
+def mon_final_code():
     img = Image.new("RGB", (MW, MH), (14, 15, 19))
     d = ImageDraw.Draw(img)
-    # older versions as small dim tabs, then the big active tab
     fnt = F(26, 800)
     label = "agent_v7_final_FINAL.py"
     tw = fnt.getlength(label) + 96
@@ -2240,20 +2355,18 @@ def mon_final():
     fill_rect(img, (tx, MMENU, tx + tw, MMENU + 4), BLUE)
     icon(img, "dot", tx + 18, MMENU + 21, 18, (250, 204, 80))
     d.text((tx + 48, MMENU + 31), label, font=fnt, fill=WHITE, anchor="lm")
-    d.text((tx + tw - 24, MMENU + 31), "×", font=F(22, 400), fill=TXT3, anchor="mm")
-    fm = MONO(16)
+    fm = MONO(18)
     cw = fm.getlength("M")
-    lh = 18.4
-    cy0 = MMENU + 70
-    lines = code_final()
+    lh = 21
+    cy0 = MMENU + 72
+    lines = code_final()[-int((MH - 60 - cy0) / lh):]
     first = 4812 - len(lines) + 1
-    fill_rect(img, (0, cy0 - 10, 76, MH - 52), (17, 18, 23))
+    fill_rect(img, (0, cy0 - 10, 80, MH - 52), (17, 18, 23))
     for i, ln in enumerate(lines):
         y = cy0 + i * lh + lh / 2
-        d.text((64, y), f"{first + i:,}", font=MONO(14), fill=TXT3, anchor="rm")
-        draw_code_line(d, 92, y, ln, fm, cw, anchor="lm")
-    # minimap of a very long file
-    mx0, mx1 = MW - 128, MW - 16
+        d.text((68, y), f"{first + i:,}", font=MONO(14), fill=TXT3, anchor="rm")
+        draw_code_line(d, 96, y, ln, fm, cw, anchor="lm")
+    mx0 = MW - 128
     fill_rect(img, (mx0 - 8, MMENU + 60, MW, MH - 52), (17, 18, 23))
     rng = random.Random(9)
     for y in range(MMENU + 66, MH - 58, 2):
@@ -2263,13 +2376,48 @@ def mon_final():
         if w:
             fill_rect(img, (mx0 + ind, y, mx0 + ind + w * 0.8, y + 1), col)
     fill_rect(img, (mx0 - 6, MH - 52 - 30, MW - 4, MH - 54), (120, 140, 180), 0.25)
-    # status bar
     fill_rect(img, (0, MH - 52, MW, MH), (36, 84, 190))
     d.text((20, MH - 26), "4,812 lines  ·  9 hours", font=F(30, 820), fill=WHITE, anchor="lm")
-    d.text((MW - 20, MH - 26), "Ln 4,812, Col 1   ·   Python   ·   ✓ all tests passed   ·   saved",
-           font=F(17, 600), fill=(225, 235, 255), anchor="rm")
-    menubar(img, E["notif_do_that"], sc=MSC, app="Code")
+    d.text((MW - 20, MH - 26), "Ln 4,812   ·   ✓ all tests passed   ·   saved", font=F(20, 650),
+           fill=(225, 235, 255), anchor="rm")
+    menubar(img, E["code_done"], sc=MSC, app="Code")
     return img
+
+
+@lru_cache(maxsize=1)
+def mon_final_back():
+    return focus(mon_final_code(), 1.0, blur=8, keep=0.45)
+
+
+@lru_cache(maxsize=1)
+def mon_done_card():
+    w, h = 1120, 400
+    im, pad = card(w, h, (48, 106, 222), (30, 76, 180), (180, 210, 255), r=R_HERO, border=0.75, bw=2.5,
+                   blur=30, op=0.72, dy=16)
+    d = ImageDraw.Draw(im)
+    icon(im, "dot", pad + 52, pad + 44, 26, (250, 204, 80))
+    d.text((pad + 92, pad + 58), "agent_v7_final_FINAL.py", font=F(32, 720), fill=(225, 236, 255), anchor="lm")
+    d.text((pad + w - 52, pad + 58), "saved", font=F(28, 550), fill=(200, 220, 255), anchor="rm")
+    t1 = "4,812 LINES"
+    t2 = "9 HOURS"
+    f1 = fit_lines([t1], w - 120, 132, 880)
+    d.text((pad + 52, pad + 210), t1, font=f1, fill=WHITE, anchor="ls")
+    d.text((pad + 52, pad + 320), t2, font=fit_lines([t2], w - 120, 96, 860), fill=WHITE, anchor="ls")
+    d.text((pad + w - 52, pad + 320), "✓ ALL TESTS PASSED", font=F(34, 780), fill=(220, 255, 228), anchor="rs")
+    return im, pad
+
+
+def mon_done(f):
+    k = enter_k(f - E["code_done"], 5)
+    img = Image.blend(mon_final_code(), mon_final_back(), k) if k < 0.999 else mon_final_back().copy()
+    im, _ = mon_done_card()
+    place_c(img, im, MW / 2, MH / 2 + 12, k, dy=40, scale0=0.95)
+    return img
+
+
+@lru_cache(maxsize=1)
+def mon_final():
+    return mon_done(E["code_done"] + ENTER)
 
 
 def mon_glitch(f):
@@ -2286,114 +2434,99 @@ def mon_glitch(f):
     arr[::3] = (arr[::3] * 0.7).astype(np.uint8)
     img = Image.fromarray(arr)
     if age % 4 in (1, 2):
-        d = ImageDraw.Draw(img)
-        d.text((MW / 2 + rng.randint(-30, 30), MH / 2), "NEW MODEL.", font=F(170, 900), fill=(255, 210, 210), anchor="mm")
+        ImageDraw.Draw(img).text((MW / 2 + rng.randint(-30, 30), MH / 2), "NEW MODEL.", font=F(190, 900),
+                                 fill=(255, 210, 210), anchor="mm")
     return img
 
 
-# --- telemetry (331-410) ------------------------------------------------------
-def mon_telemetry(f):
+# --- telemetry (builder_start .. print_start) ---------------------------------
+TELEM_LOG = ["compiling skills graph", "ingesting 1,204 papers", "watching tutorials @16x", "summarizing summaries",
+             "pruning outdated knowledge", "self-improving (iteration 3)", "allocating memory (∞)",
+             "deploying to node 0x2F", "agent online", "learning autonomously", "reading release notes",
+             "ranking 847 skills", "drafting roadmap…", "roadmap ready ✓", "opening roadmap", "sending to printer…"]
+
+
+@lru_cache(maxsize=1)
+def telemetry_bg():
     img = Image.new("RGB", (MW, MH), (4, 13, 21))
     arr = np.asarray(img).copy()
-    arr[MMENU::40, :] = (8, 26, 38)
-    arr[:, ::40] = (8, 26, 38)
+    arr[MMENU::48, :] = (8, 26, 38)
+    arr[:, ::48] = (8, 26, 38)
     img = Image.fromarray(arr)
     d = ImageDraw.Draw(img)
+    tracked(d, (52, 92), "AGENT TELEMETRY", F(26, 820), CYAN, 3.4)
+    d.text((MW - 52, 92), "agent_v8  ·  uplink ok", font=F(22, 550), fill=(100, 160, 180), anchor="rs")
+    for x0, y0, x1, y1, lab in ((48, 300, 780, 590, "LOSS"), (820, 300, 1552, 590, "THROUGHPUT"),
+                                (48, 620, 780, 876, "LOG"), (820, 620, 1552, 876, "ACTIVATIONS")):
+        fill_rr(img, (x0, y0, x1, y1), 16, (6, 22, 34))
+        ring_rr(img, (x0, y0, x1, y1), 16, 1.4, (20, 70, 90))
+        tracked(d, (x0 + 24, y0 + 38), lab, F(19, 820), (100, 180, 200), 2.4)
+    return img
+
+
+def mon_telemetry(f):
+    img = telemetry_bg().copy()
+    d = ImageDraw.Draw(img)
     online = f >= E["button_press"]
-    tracked(d, (48, 84), "AGENT TELEMETRY", F(22, 800), CYAN, 3)
-    d.text((MW - 48, 84), "agent_v8  ·  node 0x2F  ·  uplink ok", font=F(17, 500), fill=(90, 150, 170), anchor="rs")
     t0, t1 = E["idea"], E["button_press"]
     prog = clamp((f - t0) / (t1 - t0))
     if not online:
-        dots = "." * (1 + (f // 4) % 3)
-        d.text((48, 196), "TRAINING AGENT" + dots, font=F(84, 820), fill=(220, 250, 255), anchor="ls")
-        fill_rr(img, (48, 222, 1000, 240), 9, (14, 40, 56))
-        fill_rr(img, (48, 222, 48 + 952 * prog, 240), 9, CYAN)
-        d.text((1020, 240), f"{int(prog * 100)}%", font=F(30, 800), fill=CYAN, anchor="ls")
+        dots = "." * (1 + (f // 6) % 3)
+        d.text((48, 210), "TRAINING AGENT" + dots, font=F(96, 830), fill=(220, 250, 255), anchor="ls")
+        fill_rr(img, (52, 238, 1060, 262), 12, (14, 40, 56))
+        fill_rr(img, (52, 238, 52 + 1008 * prog, 262), 12, CYAN)
+        d.text((1084, 264), f"{int(prog * 100)}%", font=F(40, 820), fill=CYAN, anchor="ls")
     else:
         age = f - t1
-        sc = lerp(1.2, 1.0, ease_out((age + 1) / 4))
-        fnt = F(int(130 * sc), 850)
-        d.text((48, 222), "ONLINE", font=fnt, fill=CYAN, anchor="ls")
-        x = 48 + fnt.getlength("ONLINE") + 40
-        pulse = 0.5 + 0.5 * math.sin(age * 0.5)
-        fill_circle(img, x + 40, 176, 130, CYAN, 0.15 + 0.15 * pulse)
-        fill_circle(img, x + 40, 176, 76, CYAN)
+        fnt = F(150, 860)
+        x = 48 + (1 - enter_k(age)) * 30
+        d.text((x, 248), "ONLINE", font=fnt, fill=CYAN, anchor="ls")
+        x += fnt.getlength("ONLINE") + 44
+        fill_circle(img, x + 44, 196, 140, CYAN, 0.15 + 0.12 * (0.5 + 0.5 * math.sin(age * 0.4)))
+        fill_circle(img, x + 44, 196, 84, CYAN)
         if f >= E["lean_back"]:
-            d.text((x + 120, 196), "learning autonomously", font=F(30, 600), fill=(150, 220, 235), anchor="ls")
-    # panels
-    panels = [(48, 290, 780, 590, "LOSS"), (820, 290, 1552, 590, "THROUGHPUT  tok/s"), (48, 620, 780, 870, "LOG"),
-              (820, 620, 1552, 870, "ACTIVATIONS")]
-    for x0, y0, x1, y1, lab in panels:
-        fill_rr(img, (x0, y0, x1, y1), 12, (6, 22, 34))
-        ring_rr(img, (x0, y0, x1, y1), 12, 1.2, (20, 70, 90))
-        tracked(d, (x0 + 20, y0 + 30), lab, F(14, 800), (90, 170, 190), 2)
-    # loss curve: drawn progressively while training, then flat and calm
-    x0, y0, x1, y1 = 68, 330, 760, 570
+            d.text((x + 132, 220), "learning autonomously", font=F(38, 650), fill=(160, 225, 240), anchor="ls")
+    # loss curve: drawn while training, then flat and calm
+    x0, y0, x1, y1 = 72, 360, 756, 570
     n = 160
-    upto = int(n * clamp((f - t0) / (t1 - t0) * 1.0 + (0.0 if not online else 1.0)))
+    upto = n if online else int(n * prog)
     rng = random.Random(55)
     pts = []
     for i in range(n):
         v = math.exp(-i / 30) * 0.85 + 0.08 + rng.uniform(-0.03, 0.03) * math.exp(-i / 80)
         pts.append((x0 + (x1 - x0) * i / (n - 1), y1 - (y1 - y0) * v))
     if upto > 1:
-        aa(img, CYAN, lambda dd, P, ss: dd.line([P(*p) for p in pts[:upto]], fill=255, width=int(3 * ss), joint="curve"),
-           box=(60, 320, 770, 580))
-        fill_circle(img, pts[upto - 1][0], pts[upto - 1][1], 12, WHITE)
-    # throughput bars (scrolling)
+        aa(img, CYAN, lambda dd, P, ss: dd.line([P(*p) for p in pts[:upto]], fill=255, width=int(4 * ss), joint="curve"),
+           box=(60, 350, 770, 580))
+        fill_circle(img, pts[upto - 1][0], pts[upto - 1][1], 16, WHITE)
     s = spd(f)
-    bx0, by1 = 840, 570
-    for i in range(48):
-        k = f - 47 + i
-        r = frng("tp", k).random()
-        hh = 30 + 190 * clamp(0.25 + 0.75 * spd(k) * (0.6 + 0.4 * r))
-        fill_rect(img, (bx0 + i * 14.6, by1 - hh, bx0 + i * 14.6 + 9, by1), CYAN if i == 47 else (30, 130, 160))
-    d.text((1532, 330), f"{int(4000 + 52000 * s):,}", font=F(26, 800), fill=CYAN, anchor="rs")
-    # log
-    log_lines = ["compiling skills graph", "ingesting 1,204 papers", "watching tutorials @16x", "summarizing summaries",
-                 "pruning outdated knowledge", "self-improving (iteration 3)", "allocating memory (∞)",
-                 "deploying to node 0x2F", "agent online", "learning autonomously", "reading release notes",
-                 "ranking 847 skills", "drafting roadmap…"]
-    nlog = int(clamp((f - t0) / (E["notif_roadmap"] - t0)) * (len(log_lines) - 1)) + 1
-    for i, ln in enumerate(log_lines[:nlog][-8:]):
-        d.text((68, 668 + i * 25), f"[{clock_at(f)}]  {ln}", font=MONO(15), fill=(120, 200, 215), anchor="lm")
-    # activations grid
-    for gy in range(6):
-        for gx in range(24):
-            r = frng("act", gx, gy, f // 2).random()
-            a = clamp(0.15 + r * (0.4 + 0.6 * s))
-            fill_rect(img, (842 + gx * 29, 664 + gy * 32, 842 + gx * 29 + 22, 664 + gy * 32 + 24), CYAN, a * 0.8)
+    bx0, by1 = 846, 570
+    for i in range(36):
+        k = f - 35 + i
+        hh = 30 + 170 * clamp(0.25 + 0.75 * spd(k) * (0.6 + 0.4 * frng("tp", k).random()))
+        fill_rect(img, (bx0 + i * 19, by1 - hh, bx0 + i * 19 + 12, by1), CYAN if i == 35 else (30, 130, 160))
+    d.text((1528, 344), f"{int(4000 + 52000 * s):,} tok/s", font=F(34, 820), fill=CYAN, anchor="rs")
+    nlog = int(clamp((f - t0) / (E["print_start"] - t0)) * (len(TELEM_LOG) - 1)) + 1
+    for i, ln in enumerate(TELEM_LOG[:nlog][-6:]):
+        d.text((72, 690 + i * 31), f"› {ln}", font=MONO(22), fill=(130, 210, 225), anchor="lm")
+    for gy in range(5):
+        for gx in range(18):
+            a = clamp(0.15 + frng("act", gx, gy, f // 2).random() * (0.4 + 0.6 * s))
+            fill_rect(img, (848 + gx * 38, 680 + gy * 38, 848 + gx * 38 + 30, 680 + gy * 38 + 30), CYAN, a * 0.8)
     menubar(img, f, sc=MSC, app="Telemetry", bg=(3, 10, 16))
     return img
 
 
-# --- printing (411-491) -------------------------------------------------------
-PRINT_ROW = 34
-PRINT_ROWS_PAGE = 29
-PRINT_PAGE_H = PRINT_ROW * PRINT_ROWS_PAGE
-
-
-@lru_cache(maxsize=1)
-def print_feed_table():
-    tab, vel, acc = {}, {}, 0.0
-    for f in range(E["roadmap_open"], E["notif_obsolete"] + 1):
-        v = 4 + 1250 * spd(f) ** 2.2 if f >= E["roadmap_open"] + 2 else 0.0
-        acc += v
-        tab[f], vel[f] = acc, v
-    return tab, vel
-
-
+# --- printing (print_start .. notif_obsolete) ---------------------------------
 def paper_strip(off, h, w=700):
     """Printed paper strip, content scrolled by `off` px (content moves down as it feeds)."""
     items, _ = roadmap_items()
     img = Image.new("RGB", (w, h), (244, 243, 238))
     d = ImageDraw.Draw(img)
-    fnt = F(19, 550)
-    # paper coordinate p = off - y : content printed earlier is lower on screen
-    p_top, p_bot = off - h, off
+    fnt = F(24, 600)
+    p_top = off - h
     r0 = int(max(0, p_top) // PRINT_ROW)
-    r1 = int(p_bot // PRINT_ROW) + 1
+    r1 = int(off // PRINT_ROW) + 1
     for r in range(r0, r1 + 1):
         y = off - r * PRINT_ROW
         pg, rp = divmod(r, PRINT_ROWS_PAGE)
@@ -2401,13 +2534,11 @@ def paper_strip(off, h, w=700):
             if rp == 0:
                 for x in range(10, w - 10, 18):
                     d.line((x, y, x + 9, y), fill=(170, 170, 165), width=2)
-                d.text((w / 2, y - 22), f"— page {pg + 1} —", font=F(15, 600), fill=(120, 120, 120), anchor="mm")
+                d.text((w / 2, y - 24), f"— page {pg + 1} —", font=F(18, 650), fill=(120, 120, 120), anchor="mm")
             continue
-        idx = pg * (PRINT_ROWS_PAGE - 2) + rp - 2
-        if idx >= len(items):
-            idx %= len(items)
-        d.rectangle((40, y - 13, 56, y + 3), outline=(60, 60, 64), width=2)
-        d.text((72, y), f"{idx + 1}.  {items[idx]}", font=fnt, fill=(40, 40, 46), anchor="ls")
+        idx = (pg * (PRINT_ROWS_PAGE - 2) + rp - 2) % len(items)
+        d.rectangle((40, y - 17, 60, y + 3), outline=(60, 60, 64), width=3)
+        d.text((78, y), ellipsize(f"{idx + 1}.  {items[idx]}", fnt, w - 100), font=fnt, fill=(36, 36, 42), anchor="ls")
     return img
 
 
@@ -2415,19 +2546,24 @@ def mon_print(f, freeze=False):
     img = Image.new("RGB", (MW, MH), (12, 13, 17))
     d = ImageDraw.Draw(img)
     tab, vel = print_feed_table()
-    ff = min(f, E["notif_obsolete"] - 1)
+    ff = max(E["print_start"], min(f, E["notif_obsolete"] - 1))
     off = tab.get(ff, 0.0) + 900
     v = 0.0 if freeze else vel.get(ff, 0.0)
-    page = int((off - 900) // PRINT_PAGE_H) + 1
-    dots = "…"
-    d.text((80, 150), "PRINTING ROADMAP" + dots, font=fit("PRINTING ROADMAP" + dots, 680, 76, 820), fill=WHITE, anchor="ls")
-    d.text((84, 214), f"page {page} of ∞", font=F(46, 700), fill=CYAN, anchor="ls")
-    d.text((84, 262), f"{T.ROADMAP_TOTAL} skills  ·  sheets used: {page}  ·  toner 12%", font=F(20, 500), fill=TXT3, anchor="ls")
-    # printer slot
+    page = print_page(ff)
+    d.text((72, 170), "PRINTING", font=F(120, 850), fill=WHITE, anchor="ls")
+    d.text((72, 290), "ROADMAP…", font=F(120, 850), fill=WHITE, anchor="ls")
+    d.text((76, 380), f"page {page} of ∞", font=F(64, 760), fill=AGENT, anchor="ls")
+    d.text((76, 436), f"{T.ROADMAP_TOTAL} skills  ·  toner 12%", font=F(26, 550), fill=TXT3, anchor="ls")
+    fill_rr(img, (76, 492, 720, 516), 12, (34, 38, 48))
+    seg = (f * 18) % 800 - 160
+    if seg + 160 > 0:
+        fill_rr(img, (76 + max(0, seg), 492, 76 + min(644, seg + 160), 516), 12, CYAN)
+    d.text((76, 584), "Estimated time remaining:", font=F(30, 550), fill=TXT2, anchor="ls")
+    d.text((76, 640), "calculating…", font=F(44, 760), fill=WHITE, anchor="ls")
     sx0, sx1, sy = 820, 1540, 120
     fill_rr(img, (sx0 - 20, sy - 40, sx1 + 20, sy + 30), 18, (34, 36, 44))
     fill_rr(img, (sx0, sy - 6, sx1, sy + 10), 6, (6, 6, 8))
-    fill_circle(img, sx1 - 10, sy - 24, 12, GREEN if (f // 3) % 2 else (30, 120, 60))
+    fill_circle(img, sx1 - 10, sy - 24, 14, GREEN)
     strip = paper_strip(off, MH - sy, sx1 - sx0 - 40)
     if v > 6:
         sharp = np.asarray(strip, np.float32)
@@ -2435,16 +2571,16 @@ def mon_print(f, freeze=False):
         k = clamp((v - 6) / 100) * 0.75
         strip = Image.fromarray((sharp * (1 - k) + bl * k).clip(0, 255).astype(np.uint8))
     img.paste(strip, (sx0 + 20, sy + 4))
-    # shade under the slot
     g = Image.fromarray((np.linspace(140, 0, 40)[:, None] * np.ones((1, strip.width))).astype(np.uint8))
     img.paste((0, 0, 0), (sx0 + 20, sy + 4, sx0 + 20 + strip.width, sy + 44), g)
-    # spinner + progress on the left
-    fill_rr(img, (84, 330, 700, 350), 10, (34, 38, 48))
-    seg = (f * 18) % 760 - 160
-    fill_rr(img, (84 + max(0, seg), 330, 84 + min(616, seg + 160), 350), 10, CYAN) if seg + 160 > 0 else None
-    d.text((84, 400), "Estimated time remaining:", font=F(24, 500), fill=TXT2, anchor="ls")
-    d.text((84, 450), "calculating…", font=F(34, 700), fill=WHITE, anchor="ls")
     menubar(img, f, sc=MSC, app="Print")
+    if not freeze and f - E["print_start"] < ENTER:      # telemetry dims out as the print view slides in
+        k = enter_k(f - E["print_start"])
+        base = dim(mon_telemetry(E["print_start"] - 1), (1 - k) ** 2)
+        shift = int(round((1 - k) * 30))
+        moved = base.copy()
+        moved.paste(img.crop((0, 0, MW, MH - shift)), (0, shift))
+        img = Image.blend(base, moved, min(1.0, k * 1.6))
     return img
 
 
@@ -2477,13 +2613,13 @@ def mon_screensaver(f):
 def monitor_frame(f):
     if f < E["typing_start"]:
         return mon_reader(f)
-    if f < B["code_done"]:
+    if f < E["code_done"]:
         return mon_code(f)
     if f < E["notif_better"]:
-        return mon_final().copy()
-    if f < B["builder_start"]:
+        return mon_done(f)
+    if f < E["builder_start"]:
         return mon_glitch(f)
-    if f < E["roadmap_open"]:
+    if f < E["print_start"]:
         return mon_telemetry(f)
     if f < E["notif_obsolete"]:
         return mon_print(f)
@@ -2730,10 +2866,10 @@ def scribble_circle(bbox, seed, width=4.0):
 def notebook_script():
     """All writing on the page, in order, each with its frame window."""
     R = lambda k: NB_RULE0 + NB_RULE_DY * k  # noqa: E731
-    a0, span = B["scrib_start"], B["scrib_end"] - B["scrib_start"] + 1
+    a0, span = E["scrib_start"], E["scrib_end"] - E["scrib_start"] + 1
 
     def W(s_, e_):
-        # sub-windows authored on a 47-frame reference span, rescaled to the real S08-S09 span
+        # sub-windows authored on a 47-frame reference span, rescaled to E['scrib_start']..E['scrib_end']
         return a0 + round((s_ - 186) / 47 * span), a0 + round((e_ - 186 + 1) / 47 * span) - 1
     jobs = []
     st1 = dict(seed=11, cap=132, x0=170, base=R(3), slant=0.06, width=6.2, press=1.0, wobble=0.7, messy=0.0,
@@ -3101,9 +3237,304 @@ def render_atlas():
 
 
 # =============================================================================
+# PRINTED ROADMAP PAPER  (thermal printout for the physical scroll)
+# =============================================================================
+# head: 512 x 1536, the START of the printout (top edge = first paper out)
+# tile: 512 x 2048, the list continued, seamless vertically.  The paper tone and
+# ink-density fields are periodic over 2048 px and the head uses the last 1536
+# rows of the same field, so head -> tile -> tile ... joins without a seam.
+PAPER_W, PAPER_HEAD_H, PAPER_TILE_H = 512, 1536, 2048
+PAPER_ROW = 64                                    # 2048 / 64 = 32 rows per tile
+PAPER_SS = 3                                      # supersampling for crisp ink edges
+PAPER_TONE = np.array([243, 240, 232], np.float32)    # off-white thermal paper
+PAPER_INK = np.array([22, 22, 26], np.float32)        # near-black thermal ink
+PAPER_MONO = 26                                   # item text size (px)
+PAPER_HEAD_ITEMS = ["Linear Algebra", "Probability", "Prompt Engineering", "Unlearn Prompt Eng.",
+                    "Calculus (again)", "Python 4 (not out)", "Agent Framework #47", "Framework #48 (new!)",
+                    "Read 300 papers", "Transformers", "Attention (paper)", "Attention (yours)",
+                    "Sleep (optional)", "RAG", "Why RAG is dead", "RAG is back"]
+PAPER_TILE_ROWS = [  # rows of the tile; str = item, ("§", text) = section line
+    "Fine-tuning", "Unlearn Fine-tuning", "Agent Framework #112", "Touch grass (sched.)",
+    "Evals for your evals", "Vibe Architecture", "Context windows (∞)", "Read 1,000 papers",
+    "Prompt Engineering 3", ("§", "MODULE 7: AGENTS (AGAIN)"), "Quantization (4-bit)", "Eat (batch job)",
+    "MLOps (new version)", "Reasoning models", "Synthetic data", "Distillation", "Mixture of Experts",
+    "Embeddings 2", "Unlearn everything", "GPU kernels", "Interpretability", "Tokenizers (again)",
+    ("§", "MODULE 8: EVERYTHING NEW"), "AI Safety", "Agents managing agents", "Benchmarks (new)",
+    "World models", "Long context", "Model merging", "Small models", "Re-learn Linear Alg.",
+    "Sleep (deprecated)"]
+
+
+@lru_cache(maxsize=1)
+def paper_fields():
+    """(tone RGB, ink density) for one 2048-px period."""
+    H, W = PAPER_TILE_H, PAPER_W
+    rng = np.random.default_rng(51_2048)
+
+    def periodic(gy, gx, amp):
+        g = np.tile(rng.normal(0, 1, (gy, gx)).astype(np.float32), (3, 1))
+        a = np.asarray(Image.fromarray(g).resize((W, 3 * H), Image.BICUBIC))[H:2 * H]
+        return a / (a.std() + 1e-6) * amp
+
+    mottle = periodic(16, 4, 1.8) + periodic(64, 16, 0.9)
+    grain = rng.normal(0, 1.1, (H, W)).astype(np.float32)
+    tone = PAPER_TONE[None, None, :] + (mottle + grain)[..., None] * np.array([1.0, 1.0, 1.08], np.float32)
+    y = np.arange(H, dtype=np.float32)[:, None]
+    band = 1 - 0.05 * (0.5 + 0.5 * np.sin(2 * np.pi * y * 8 / H)) - 0.03 * (0.5 + 0.5 * np.sin(2 * np.pi * y * 37 / H + 1.3))
+    dens = (0.93 + 0.05 * periodic(32, 8, 1.0)) * band
+    for x in (97, 98, 311):                         # faint thermal-head streaks
+        dens[:, x] *= 0.78
+    return tone, np.clip(dens, 0.6, 1.0)
+
+
+def paper_compose(mask, y0):
+    """Ink an L mask (H x 512) onto paper using field rows y0..y0+H (mod 2048)."""
+    tone, dens = paper_fields()
+    H = mask.height
+    rows = (np.arange(H) + y0) % PAPER_TILE_H
+    a = np.asarray(mask, np.float32)[..., None] / 255.0 * dens[rows][..., None]
+    out = tone[rows] * (1 - a) + PAPER_INK * a
+    return Image.fromarray(out.clip(0, 255).astype(np.uint8))
+
+
+def paper_text(d, xy, text, size, anchor="ls", font=None):
+    """Thermal-ish mono text: slightly emboldened DejaVu Sans Mono at PAPER_SS scale."""
+    S = PAPER_SS
+    fnt = font or MONO(size * S)
+    d.text((xy[0] * S, xy[1] * S), text, font=fnt, fill=255, anchor=anchor, stroke_width=max(1, int(0.55 * S)),
+           stroke_fill=255)
+
+
+def paper_item(d, y, num, name):
+    """One checkbox row whose top edge is at y (1x px)."""
+    S = PAPER_SS
+    yc = y + PAPER_ROW / 2
+    x = 24
+    d.rectangle((x * S, (yc - 14) * S, (x + 28) * S, (yc + 14) * S), outline=255, width=int(3.2 * S))
+    paper_text(d, (x + 44, yc), f"{num:03d}", PAPER_MONO, "lm")
+    nx = x + 44 + 3 * PAPER_MONO * 0.602 + 16
+    size = PAPER_MONO
+    while size > 20 and MONO(size * S).getlength(name) / S > PAPER_W - 20 - nx:
+        size -= 1
+    paper_text(d, (nx, yc), name, size, "lm")
+
+
+def paper_section(d, y, text):
+    S = PAPER_SS
+    yc = y + PAPER_ROW / 2
+    paper_text(d, (PAPER_W / 2, yc), text, 21, "mm")
+    tw = MONO(21 * S).getlength(text) / S
+    for x0, x1 in ((18, PAPER_W / 2 - tw / 2 - 12), (PAPER_W / 2 + tw / 2 + 12, PAPER_W - 18)):
+        if x1 - x0 > 8:
+            d.line((x0 * S, yc * S, x1 * S, yc * S), fill=255, width=int(3 * S))
+
+
+def dashed(d, y, w=3, dash=14, gap=9):
+    S = PAPER_SS
+    x = 18
+    while x < PAPER_W - 18:
+        d.line((x * S, y * S, min(PAPER_W - 18, x + dash) * S, y * S), fill=255, width=int(w * S))
+        x += dash + gap
+
+
+def render_paper_head():
+    S, W, H = PAPER_SS, PAPER_W, PAPER_HEAD_H
+    m = Image.new("L", (W * S, H * S), 0)
+    d = ImageDraw.Draw(m)
+    paper_text(d, (W / 2, 70), "*** AGENT v8 · PRINTOUT ***", 20, "ms")
+    lines = ["YOUR AI", "LEARNING", "ROADMAP"]
+    fnt = fit_lines(lines, W - 44, 110, 900)
+    size = fnt.size
+    big = F(size * S, 900)
+    cap, lh = size * 0.727, size * 1.06
+    y = 112 + cap
+    for ln in lines:
+        d.text((W / 2 * S, y * S), ln, font=big, fill=255, anchor="ms")
+        y += lh
+    y += 6 - lh + 46
+    sub = "847 SKILLS · PERSONALIZED · v1.0"
+    sf = fit(sub, W - 40, 30, 760, 14)
+    d.text((W / 2 * S, y * S), sub, font=F(sf.size * S, 760), fill=255, anchor="ms")
+    y += 26
+    for dy in (0, 10):
+        d.line((18 * S, (y + dy) * S, (W - 18) * S, (y + dy) * S), fill=255, width=int(3.5 * S))
+    y += 52
+    for k, v in (("FOR", "YOU"), ("DATE", "TODAY"), ("VALID UNTIL", "TOMORROW"), ("EST. TIME", "41,300 h"),
+                 ("MASTERED", "0 / 847")):
+        n = 34 - len(k) - len(v)
+        paper_text(d, (22, y), f"{k} {'.' * (n - 2)} {v}", 21, "ls")
+        y += 34
+    y += 4
+    dashed(d, y)
+    row0 = int(math.ceil((y + 14) / PAPER_ROW)) * PAPER_ROW
+    n_rows = (H - row0) // PAPER_ROW
+    for i in range(n_rows):
+        paper_item(d, row0 + i * PAPER_ROW, i + 1, PAPER_HEAD_ITEMS[i % len(PAPER_HEAD_ITEMS)])
+    m = m.reduce(S)
+    return paper_compose(m, PAPER_TILE_H - H), n_rows
+
+
+def render_paper_tile():
+    S, W, H = PAPER_SS, PAPER_W, PAPER_TILE_H
+    assert len(PAPER_TILE_ROWS) == H // PAPER_ROW
+    m = Image.new("L", (W * S, H * S), 0)
+    d = ImageDraw.Draw(m)
+    num = 101
+    for r, row in enumerate(PAPER_TILE_ROWS):
+        if isinstance(row, tuple):
+            paper_section(d, r * PAPER_ROW, row[1])
+        else:
+            paper_item(d, r * PAPER_ROW, num, row)
+            num += 1
+    return paper_compose(m.reduce(S), 0)
+
+
+def render_paper_textures():
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    head, n = render_paper_head()
+    head.save(OUT_DIR / "roadmap_paper_head.png", "PNG", compress_level=9)
+    tile = render_paper_tile()
+    tile.save(OUT_DIR / "roadmap_paper_tile.png", "PNG", compress_level=9)
+    return head, tile
+
+
+# =============================================================================
+# LAPTOP KEYBOARD  (2048 x 780 albedo + emission mask; plane is 0.29 m x 0.11 m)
+# =============================================================================
+KB_W, KB_H = 2048, 780
+KB_SS = 2
+KB_U = 128                                        # one key unit in px (15 units across)
+KB_FN_H = 0.62                                    # function row height in units
+KB_GAP = 0.13                                     # gap between keycaps in units
+KB_CAP_TOP, KB_CAP_BOT = (40, 41, 46), (27, 28, 32)
+KB_WELL = (9, 9, 11)
+KB_LEGEND = (208, 211, 217)
+KB_BACKLIGHT = (120, 165, 255)
+
+
+def kb_layout():
+    """[(x, y, w, h, legend)] in 1x px; legend = (kind, *text)."""
+    u = KB_U
+    L = lambda t: ("letter", t)            # noqa: E731
+    Dl = lambda a, b: ("dual", a, b)       # noqa: E731
+    wl = lambda t: ("word_l", t)           # noqa: E731
+    wr = lambda t: ("word_r", t)           # noqa: E731
+    rows = [
+        (KB_FN_H, [(1.5, wl("esc"))] + [(1.0, ("fkey", f"F{i}")) for i in range(1, 13)] + [(1.5, wr("del"))]),
+        (1.0, [(1, Dl("~", "`")), (1, Dl("!", "1")), (1, Dl("@", "2")), (1, Dl("#", "3")), (1, Dl("$", "4")),
+               (1, Dl("%", "5")), (1, Dl("^", "6")), (1, Dl("&", "7")), (1, Dl("*", "8")), (1, Dl("(", "9")),
+               (1, Dl(")", "0")), (1, Dl("_", "-")), (1, Dl("+", "=")), (2, wr("backspace"))]),
+        (1.0, [(1.5, wl("tab"))] + [(1, L(c)) for c in "QWERTYUIOP"] +
+              [(1, Dl("{", "[")), (1, Dl("}", "]")), (1.5, Dl("|", "\\"))]),
+        (1.0, [(1.75, wl("caps lock"))] + [(1, L(c)) for c in "ASDFGHJKL"] +
+              [(1, Dl(":", ";")), (1, Dl('"', "'")), (2.25, wr("enter"))]),
+        (1.0, [(2.25, wl("shift"))] + [(1, L(c)) for c in "ZXCVBNM"] +
+              [(1, Dl("<", ",")), (1, Dl(">", ".")), (1, Dl("?", "/")), (2.75, wr("shift"))]),
+        (1.0, [(1, wl("fn")), (1, wl("ctrl")), (1, wl("alt")), (1.25, ("glyph", "◆")), (5.5, ("blank",)),
+               (1.25, ("glyph", "◆")), (1, wr("alt")), (3, ("arrows",))]),
+    ]
+    total_h = sum(h for h, _ in rows) * u
+    x0, y = (KB_W - 15 * u) / 2, (KB_H - total_h) / 2
+    keys = []
+    for h, row in rows:
+        x = x0
+        for w, leg in row:
+            if leg[0] == "arrows":                # inverted T, half-height keys
+                hh = h * u / 2
+                keys.append((x, y + hh, u, hh, ("glyph", "←")))
+                keys.append((x + u, y, u, hh, ("glyph", "↑")))
+                keys.append((x + u, y + hh, u, hh, ("glyph", "↓")))
+                keys.append((x + 2 * u, y + hh, u, hh, ("glyph", "→")))
+            else:
+                keys.append((x, y, w * u, h * u, leg))
+            x += w * u
+        y += h * u
+    return keys
+
+
+def render_keyboard():
+    S, u = KB_SS, KB_U
+    W, H = KB_W * S, KB_H * S
+    g = KB_GAP * u
+    keys = kb_layout()
+    caps = Image.new("L", (W, H), 0)             # keycap footprint
+    top_lit = Image.new("L", (W, H), 0)          # top-edge bevel highlight
+    low_edge = Image.new("L", (W, H), 0)         # bottom-edge shade
+    legends = Image.new("L", (W, H), 0)
+    cap_rgb = Image.new("RGB", (W, H), KB_WELL)
+    dl = ImageDraw.Draw(legends)
+    for (x, y, w, h, leg) in keys:
+        half = h < u * 0.7
+        ins = g / 2 if not half else g / 3
+        bx0, by0, bx1, by1 = (x + ins) * S, (y + ins) * S, (x + w - ins) * S, (y + h - ins) * S
+        kw, kh = int(round(bx1 - bx0)), int(round(by1 - by0))
+        r = (0.11 if not half else 0.08) * u * S
+        m = rr_mask(kw, kh, r, ss=2)
+        ox, oy = int(round(bx0)), int(round(by0))
+        caps.paste(255, (ox, oy, ox + kw, oy + kh), m)
+        cap_rgb.paste(vgrad(kw, kh, KB_CAP_TOP, KB_CAP_BOT), (ox, oy), m)
+        ring = rr_ring(kw, kh, r, 2.2 * S, ss=2)
+        ramp = np.linspace(1.0, 0.0, kh, dtype=np.float32)[:, None] ** 1.6
+        top_lit.paste(Image.fromarray((np.asarray(ring, np.float32) * ramp).astype(np.uint8)), (ox, oy),
+                      Image.fromarray((np.asarray(ring, np.float32) * ramp).astype(np.uint8)))
+        low = Image.fromarray((np.asarray(ring, np.float32) * ramp[::-1] ** 0.8).astype(np.uint8))
+        low_edge.paste(low, (ox, oy), low)
+        # legends
+        cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
+        kind = leg[0]
+        pad_x, pad_b = 0.15 * u * S, 0.17 * u * S
+        if kind == "letter":
+            dl.text((cx, cy + 0.01 * u * S), leg[1], font=F(0.30 * u * S, 520), fill=255, anchor="mm")
+        elif kind == "dual":
+            f2 = F(0.215 * u * S, 520)
+            dl.text((cx, by0 + (by1 - by0) * 0.33), leg[1], font=f2, fill=255, anchor="mm")
+            dl.text((cx, by0 + (by1 - by0) * 0.70), leg[2], font=f2, fill=255, anchor="mm")
+        elif kind == "word_l":
+            dl.text((bx0 + pad_x, by1 - pad_b * (0.75 if half else 1)), leg[1], font=F((0.155 if not half else 0.15) * u * S, 560),
+                    fill=255, anchor="ls")
+        elif kind == "word_r":
+            dl.text((bx1 - pad_x, by1 - pad_b * (0.75 if half else 1)), leg[1], font=F((0.155 if not half else 0.15) * u * S, 560),
+                    fill=255, anchor="rs")
+        elif kind == "fkey":
+            dl.text((cx, cy), leg[1], font=F(0.17 * u * S, 560), fill=255, anchor="mm")
+        elif kind == "glyph":
+            fnt = MONO(0.21 * u * S) if leg[1] == "◆" else F(0.24 * u * S, 600)
+            dl.text((cx, cy), leg[1], font=fnt, fill=255, anchor="mm")
+    capf = np.asarray(caps, np.float32) / 255.0
+    outside = 1.0 - capf
+    # soft cool backlight leaking out from under every keycap
+    halo = np.asarray(caps.filter(ImageFilter.GaussianBlur(7 * S)), np.float32) / 255.0
+    halo2 = np.asarray(caps.filter(ImageFilter.GaussianBlur(2.5 * S)), np.float32) / 255.0
+    glow = np.clip(0.55 * halo + 0.6 * halo2, 0, 1) * outside
+    shadow_src = Image.new("L", (W, H), 0)
+    shadow_src.paste(caps.crop((0, 0, W, H - 5 * S)), (0, 5 * S))
+    shadow = np.asarray(shadow_src.filter(ImageFilter.GaussianBlur(5 * S)), np.float32) / 255.0 * outside
+    rng = np.random.default_rng(2048)
+    noise = rng.normal(0, 1.0, (H // 2, W // 2)).astype(np.float32)
+    noise = np.asarray(Image.fromarray(noise).resize((W, H), Image.BILINEAR))
+    rgb = np.asarray(cap_rgb, np.float32)
+    rgb = rgb + noise[..., None] * 1.2
+    well = rgb * (1 - 0.55 * shadow[..., None]) + glow[..., None] * np.array(KB_BACKLIGHT, np.float32) * 0.38
+    rgb = rgb * capf[..., None] + well * outside[..., None]
+    hi = np.asarray(top_lit, np.float32)[..., None] / 255.0
+    lo = np.asarray(low_edge, np.float32)[..., None] / 255.0
+    rgb = rgb * (1 - 0.55 * hi) + np.array([86, 89, 98], np.float32) * 0.55 * hi
+    rgb = rgb * (1 - 0.45 * lo)
+    leg = np.asarray(legends, np.float32)[..., None] / 255.0
+    rgb = rgb * (1 - leg) + np.array(KB_LEGEND, np.float32) * leg
+    albedo = Image.fromarray(rgb.clip(0, 255).astype(np.uint8)).resize((KB_W, KB_H), Image.LANCZOS)
+    emis = np.maximum(leg[..., 0], np.clip(glow * 0.75, 0, 1))
+    glow_img = Image.fromarray((emis * 255).clip(0, 255).astype(np.uint8)).resize((KB_W, KB_H), Image.LANCZOS)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    albedo.save(OUT_DIR / "keyboard.png", "PNG", compress_level=9)
+    glow_img.save(OUT_DIR / "keyboard_glow.png", "PNG", compress_level=9)
+    return albedo, glow_img
+
+
+# =============================================================================
 # Runner
 # =============================================================================
 RENDERERS = {}
+STATICS = {}                       # single images: name -> render function
 
 
 def _render_task(task):
@@ -3118,7 +3549,9 @@ RENDERERS["laptop"] = laptop_frame
 RENDERERS["monitor"] = monitor_frame
 RENDERERS["notebook"] = notebook_frame
 RENDERERS["display"] = display_frame
-RENDERERS["atlas"] = render_atlas
+STATICS["atlas"] = render_atlas
+STATICS["paper"] = render_paper_textures
+STATICS["keyboard"] = render_keyboard
 
 
 def parse_frames(spec):
@@ -3130,7 +3563,7 @@ def parse_frames(spec):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", default="", help="comma list of: " + ",".join(list(SEQUENCES) + ["atlas"]))
+    ap.add_argument("--only", default="", help="comma list of: " + ",".join(list(SEQUENCES) + list(STATICS)))
     ap.add_argument("--frames", default="", help="film frame range a-b (clipped per sequence)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     ap.add_argument("--contact", default="", help="write a key-frame contact sheet to this path and exit")
@@ -3139,20 +3572,21 @@ def main(argv=None):
     if args.contact:
         build_contact_sheet(Path(args.contact))
         return
-    only = [s.strip() for s in args.only.split(",") if s.strip()] or list(SEQUENCES) + ["atlas"]
+    only = [s.strip() for s in args.only.split(",") if s.strip()] or list(SEQUENCES) + list(STATICS)
     rng = parse_frames(args.frames)
     tasks = []
     for seq in only:
-        if seq == "atlas" or seq not in SEQUENCES:
+        if seq not in SEQUENCES:
             continue
         a, b, _, _ = SEQUENCES[seq]
         if rng:
             a, b = max(a, rng[0]), min(b, rng[1])
         tasks += [(seq, f) for f in range(a, b + 1)]
     t0 = time.time()
-    if "atlas" in only and "atlas" in RENDERERS:
-        RENDERERS["atlas"]()
-        print("atlas ->", OUT_DIR / "crowd_atlas.png")
+    for name, fn in STATICS.items():
+        if name in only:
+            fn()
+            print(f"{name} -> written to", OUT_DIR)
     stats, seen = {}, {}
 
     def store(seq, f, data):
@@ -3181,14 +3615,13 @@ def main(argv=None):
     print(f"done in {time.time() - t0:.1f} s")
 
 
-CONTACT_KEYS = [("laptop", [60, 95, 120, 200, 250, 290, 320, 360, 405, 425, 500]),
-                ("monitor", [100, 230, 290, 380, 450, 600]),
-                ("notebook", [41, 57, 158, 232]),
-                ("display", [590, 600, 630, 650])]
+CONTACT_KEYS = [("laptop", [100, 120, 200, 225, 250, 290, 300, 380, 402, 406, 412, 425, 450, 505, 660]),
+                ("monitor", [150, 220, 270, 330, 450])]
+CONTACT_TEXTURES = [("roadmap_paper_head.png", 1000), ("roadmap_paper_tile.png", 1000), ("keyboard.png", 560)]
 
 
-def build_contact_sheet(path, thumb_h=250, width=2000):
-    """Key frames (read from disk, rendered on the fly if missing) plus the atlas."""
+def build_contact_sheet(path, thumb_h=300, width=2460):
+    """Key frames (read from disk, rendered on the fly if missing) plus the static textures."""
     items = []
     for seq, frames in CONTACT_KEYS:
         a, b, _, ext = SEQUENCES[seq]
@@ -3197,26 +3630,31 @@ def build_contact_sheet(path, thumb_h=250, width=2000):
                 continue
             fp = OUT_DIR / seq / f"{seq}_{f:04d}.{ext}"
             im = Image.open(fp).convert("RGB") if fp.exists() else RENDERERS[seq](f)
-            items.append((f"{seq} {f:04d}  ({T.shot_at(f)['id']})", im))
-    ap = OUT_DIR / "crowd_atlas.png"
-    items.append(("crowd_atlas", Image.open(ap).convert("RGB") if ap.exists() else render_atlas()))
-    pad, lab = 14, 26
+            items.append((f"{seq} {f:04d}  ({T.shot_at(f)['id']})", im, thumb_h))
+    for name, h in CONTACT_TEXTURES:
+        fp = OUT_DIR / name
+        if not fp.exists():
+            render_paper_textures() if name.startswith("roadmap") else render_keyboard()
+        items.append((name, Image.open(fp).convert("RGB"), h))
+    pad, lab = 14, 28
     rows, row, x = [], [], pad
-    for name, im in items:
-        w = int(im.width * thumb_h / im.height)
+    for name, im, h in items:
+        w = int(im.width * h / im.height)
         if row and x + w + pad > width:
             rows.append(row)
             row, x = [], pad
-        row.append((name, im.resize((w, thumb_h), Image.LANCZOS), x))
+        row.append((name, im.resize((w, h), Image.LANCZOS), x))
         x += w + pad
     rows.append(row)
-    sheet = Image.new("RGB", (width, pad + len(rows) * (thumb_h + lab + pad)), (40, 42, 46))
+    heights = [max(t.height for _, t, _ in r) for r in rows]
+    sheet = Image.new("RGB", (width, pad + sum(h + lab + pad for h in heights)), (40, 42, 46))
     d = ImageDraw.Draw(sheet)
-    for r, row in enumerate(rows):
-        y = pad + r * (thumb_h + lab + pad)
-        for name, im, x in row:
-            d.text((x, y + 18), name, font=F(17, 650), fill=(230, 232, 236), anchor="ls")
+    y = pad
+    for r, hgt in zip(rows, heights):
+        for name, im, x in r:
+            d.text((x, y + 20), name, font=F(19, 650), fill=(230, 232, 236), anchor="ls")
             sheet.paste(im, (x, y + lab))
+        y += hgt + lab + pad
     path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(path, "JPEG", quality=90)
     print("contact sheet ->", path)

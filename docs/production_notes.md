@@ -103,3 +103,58 @@ Newest entries at the bottom. Records decisions, milestones, render settings and
 - Voice lines are processed Windows TTS (disclosed). A human performance would be warmer.
 - The far-loop field is a set of emissive instances (it reads as the system from 1 km up,
   but has no detail up close).
+
+## 2026-10-31: Second pass (director's notes: more cinematic, less chaotic, a better face)
+
+Notes received: some shots unreadable, the character too low-poly with a misaligned nose,
+a blurry keyboard insert, an Act III (machine → roadmap → printout → obsolete) that went by
+too fast to follow, UI polish, and later "I don't like the face".
+
+- **Skills.** Installed the Blender Expert Skills from scenario-labs/skills and followed them:
+  sculpting (masses first, stated planes, the hair rules), previs (one fact per shot, eye-height
+  cameras, a consistent insert angle, a visibility audit) and lighting (a large-source face key,
+  light compositing). Their `bx_sculpt.py` is vendored unmodified in `scripts/vendor/` (MIT).
+- **Face, round 1.** Rebuilt the head as one signed-distance sculpt (`head_sculpt.py`), which
+  fixed the floating, misaligned nose. Styled it on a caricature reference from the creator
+  (long nose, heavy lids, big ears) and dropped the glasses.
+- **Face, round 2 (final).** The creator still disliked it. Asked what was wrong: the nose, the
+  head and jaw shape, and the overall look. Their chosen direction was "cute, appealing".
+  Redesigned it: a big round cranium, big eyes (r 35 mm) on the head's midline, a button nose,
+  a short soft jaw with full cheeks and rosy blush, softer arched brows and medium ears. Skin
+  bump reduced (it read as sandpaper in close-ups), the face key softened from 26 W to 13 W,
+  and the base eyelid opening raised so stress never drops the lids to a sleepy 14°.
+- **Hair.** The shell now follows the skull (the skull field +7 mm), because blended jaw masses
+  bulged through a fixed ellipsoid. The forehead hairline cut is limited to the front half; one
+  tilted plane had shaved the back of the head (the skill's "garrison cap" mistake). Comb
+  grooves read as cap seams, so they became soft raised clumps. Messy and Blown displacements
+  saturate at 14 mm, because the bigger quiff had spiked 20 cm in the hall shots.
+- **Neck.** Replaced the one-span cylinder (it subdivided into a striped barrel) with a tapered
+  16-ring tube, and added a ribbed crew collar so it doesn't read as a peg.
+- **Retime.** Act III beats are held 0.8–1.6 s. 31 shots now; S19 is split into S19 (the printout
+  hangs off the desk, header readable) and S19b (a locked-off wide as the paper floods the room).
+- **Readability fixes:**
+  - Keyboard insert (S07): it was a grazing angle whose specular glare washed out the keys. Now
+    a high three-quarter at f/8 over matte keycaps with backlit legends.
+  - The printed roadmap read upside down from the front, so it's re-oriented. It prints slowly
+    for 20 frames, then pours.
+  - S12 is now shot from the notification side, so both of his looks read.
+  - S21 moved clear of the larger quiff.
+  - The whisper (S24) settles between him and the door, so his face is three-quarter and lit by
+    a door-motivated key. The whisper caption is bolder and sits on a soft dark pill.
+- **Visibility audit.** `scripts/audit_shots.py` ray-casts five rays per shot at its start,
+  middle and end, and reports anything hit well before the focus distance. It ended with 0 findings.
+- **Audio.** Regenerated from the new timeline. The optional stretch beat was cut, so its cloth
+  sound is now skipped when the window is empty (it crashed the synth before).
+
+## 2026-10-31: Second-pass delivery
+
+- Final render, preset `final`: 720/720 frames at 1920×1080, about 6–11 s/frame (the bedroom
+  gets slower as it fills with clutter and paper).
+- Blender quit without an error message after frame 491 (exit code 4). Disk space was fine
+  (19 GB free). It was most likely the 4 GB GPU under a long session. Frames 492–720 were
+  re-rendered in 40-frame chunks, one Blender process each with an automatic retry, and every
+  chunk completed. All 720 frames were checked to be newer than the final `.blend`.
+- Assembled with `scripts/assemble_video.py`: `renders/skill_issue_final.mp4`, 22.3 MB.
+- `scripts/validate_project.py`: 14/14 checks pass on the frames and MP4. The `.blend` check
+  (`-- --blend`) passes 7/7, with 31 camera markers bound.
+- `evidence/06_character_redesign.png` comes from the new `scripts/character_turnaround.py`.

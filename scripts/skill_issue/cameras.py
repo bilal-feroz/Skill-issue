@@ -26,12 +26,34 @@ def ch(name, f):
 
 
 class Shot:
-    def __init__(self, cam, ranges, pos, target, lens, fstop=2.8, shake=0.1, roll=None, near=0.02):
-        self.cam, self.ranges, self.pos, self.target, self.lens = cam, ranges, pos, target, lens
-        self.fstop, self.shake, self.roll, self.near = fstop, shake, roll, near
+    """One shot's camera, authored in shot-relative time t in [0, 1]."""
+
+    def __init__(self, sid, pos, target, lens, fstop=4.0, shake=0.05, near=0.02):
+        sh = next(x for x in T.SHOTS if x["id"] == sid)
+        self.sid, self.cam = sid, sh["cam"]
+        self.a, self.b = sh["start"], sh["end"]
+        self.ranges = [(self.a, self.b)]
+        self.fstop, self.shake, self.near = fstop, shake, near
+        self._pos, self._target, self._lens = pos, target, lens
+
+    def t(self, f):
+        return max(0.0, min(1.0, (f - self.a) / max(1, self.b - self.a)))
+
+    def pos(self, f):
+        return V(self._pos(self.t(f))) if self._pos else None
+
+    def target(self, f):
+        tg = self._target
+        if isinstance(tg, U.Track):
+            return V(tg(self.t(f)))
+        return V(tg(f))
+
+    def lens(self, f):
+        return self._lens(self.t(f))
 
 
 def track(*keys):
+    """Keys in shot-relative time: (t, value[, ease])."""
     t = U.Track()
     for k in keys:
         t.key(*k)
@@ -39,85 +61,102 @@ def track(*keys):
 
 
 def build(ctx, hero):
-    """Define every shot. Positions are in station space (they ride the belt)."""
+    """Define every shot. Positions are in station space (they ride the belt).
+
+    Grammar (scenario-blender-previs-storyboard): one fact per shot, eye height unless a
+    stated reason, one consistent screen-insert angle, calm cameras early and kinetic later,
+    handheld only where urgency motivates it."""
     W = hero.W
     head = lambda f: hero_point(hero, f, "head", (0, -0.10, 1.56))
-    face = lambda f: hero_point(hero, f, "head", (0, -0.13, 1.52))
+    face = lambda f: hero_point(hero, f, "head", (0, -0.13, 1.55))      # eyes-to-nose: room for the quiff
     chest = lambda f: hero_point(hero, f, "chest", (0, -0.05, 1.22))
-    hands = lambda f: (hero_point(hero, f, "hand.L", (0.24, -0.03, 0.74)) + hero_point(hero, f, "hand.R", (-0.24, -0.03, 0.74))) / 2
     const = lambda p: (lambda f, p=V(p): p)
-    lerp_t = lambda a, b, f0, f1, ease="smooth": (lambda f: a(f).lerp(b(f), U.ease((f - f0) / (f1 - f0), ease)))
-    e = E
     shots = []
     A = shots.append
-    A(Shot("CAM_S01_Establish", [(1, 44)], track((1, (-1.55, -1.42, 1.72)), (44, (-1.05, -0.92, 1.56), "smooth")),
-           lerp_t(const((0.25, 1.25, 1.05)), head, 1, 44), track((1, 24.0), (44, 27.0)), 4.0, 0.06))
-    A(Shot("CAM_S02_Notebook", [(45, 68), (141, 160)],
-           track((45, (0.50, 0.88, 1.38)), (68, (0.51, 0.91, 1.35)), (141, (0.49, 0.89, 1.37)), (160, (0.51, 0.93, 1.33))),
-           const(W["notebook_page"] + V((0.0, 0.03, 0))), track((45, 40.0), (160, 42.0)), 4.0, 0.05))
-    webcam = (0.03, 1.49, 1.10)
-    A(Shot("CAM_S03_Webcam", [(69, 92)], track((69, webcam), (92, (0.03, 1.48, 1.10))), face, track((69, 32.0)), 2.8, 0.04))
-    A(Shot("CAM_S04_Screen", [(93, 122), (491, 502)],
-           # S20 looks down over his head: by then a book tower has grown where the S04 angle was
-           track((93, (0.50, 1.05, 1.02)), (122, (0.47, 1.09, 1.01)), (491, (0.27, 0.66, 1.74)), (502, (0.25, 0.72, 1.70))),
-           const(W["laptop_screen"]), track((93, 42.0), (122, 46.0), (491, 62.0), (502, 68.0)), 4.0, 0.08))
-    A(Shot("CAM_S05_WebcamDoubt", [(123, 140)], track((123, (0.03, 1.49, 1.10)), (140, (0.03, 1.45, 1.11), "smooth")),
-           face, track((123, 32.0), (140, 40.0)), 2.8, 0.05))
-    A(Shot("CAM_S07_Hands", [(161, 184)], track((161, (-0.37, 1.33, 0.87)), (184, (-0.34, 1.31, 0.86))),
-           hands, track((161, 48.0)), 2.2, 0.35))
-    A(Shot("CAM_S08_Front", [(185, 214)], track((185, (-0.12, 1.70, 1.06)), (214, (-0.06, 1.64, 1.09))),
-           lambda f: face(f).lerp(chest(f), 0.55), track((185, 22.0), (214, 20.0)), 4.0, 0.9))
-    A(Shot("CAM_S09_Clock", [(215, 232)], track((215, (-0.30, 0.98, 0.93)), (232, (-0.38, 1.04, 0.88), "in")),
-           const(W["clock"] + V((0.02, 0.02, -0.01))), track((215, 40.0), (232, 52.0)), 2.2, 0.8))
-    screen_cam = (-0.17, 1.13, 0.98)
-    A(Shot("CAM_S10_Tutorial", [(233, 256), (269, 284)],
-           track((233, screen_cam), (256, (-0.15, 1.16, 0.97)), (269, (-0.17, 1.13, 0.98)), (284, (-0.15, 1.17, 0.97))),
-           const(W["laptop_screen"]), track((233, 40.0), (256, 44.0), (269, 40.0), (284, 44.0)), 5.6, 0.25))
-    A(Shot("CAM_S11_Nod", [(257, 268)], track((257, (0.03, 1.46, 1.10))), face, track((257, 36.0)), 2.8, 0.6))
-    A(Shot("CAM_S12_Shoulder", [(285, 312)], track((285, (-0.66, 1.24, 1.27)), (312, (-0.63, 1.24, 1.26))),
-           const(V((0.14, 1.06, 1.12))), track((285, 32.0)), 4.0, 0.03))
-    A(Shot("CAM_S13_Scream", [(313, 330)], track((313, (0.03, 1.50, 1.10)), (318, (0.03, 1.30, 1.13), "expo_out"), (330, (0.03, 1.27, 1.14))),
-           face, track((313, 26.0), (318, 40.0), (330, 44.0)), 2.8, 1.6))
-    A(Shot("CAM_S14_Build", [(331, 362)], track((331, (-0.88, 1.58, 1.28)), (362, (-0.80, 1.52, 1.22))),
-           lerp_t(head, const(W["machine"]), 331, 345), track((331, 26.0)), 4.0, 0.7))
-    A(Shot("CAM_S15_Machine", [(363, 386)], track((363, (-0.64, 1.00, 0.97)), (386, (-0.60, 1.05, 0.95))),
-           const(W["machine"] + V((0.04, -0.04, -0.03))), track((363, 42.0), (386, 46.0)), 2.8, 0.3))
-    A(Shot("CAM_S16_Relax", [(387, 410)], track((387, (0.10, 1.62, 1.42)), (410, (0.10, 1.60, 1.40))),
-           lambda f: face(f).lerp(chest(f), 0.35), track((387, 28.0)), 4.0, 0.05))
-    A(Shot("CAM_S17_Roadmap", [(411, 434)], track((411, (-0.17, 1.13, 0.98)), (434, (-0.14, 1.18, 0.97), "smooth")),
-           const(W["laptop_screen"]), track((411, 40.0)), 5.6, 0.1))
-    A(Shot("CAM_S18_Scroll", [(435, 468)], track((435, (0.40, 0.42, 1.35)), (468, (-1.70, -1.58, 2.28), "out")),
-           lerp_t(const(W["machine"]), const(V((0.3, -0.2, 0.2))), 435, 468), track((435, 24.0), (468, 18.0)), 8.0, 0.15))
-    A(Shot("CAM_S19_Looks", [(469, 490)], track((469, (0.03, 1.49, 1.10))), face, track((469, 30.0)), 2.8, 0.03))
-    A(Shot("CAM_S21_Empty", [(503, 516)], track((503, (0.03, 1.46, 1.11))), face, track((503, 40.0)), 2.8, 0.0))
-    A(Shot("CAM_S22_Stand", [(517, 538)], track((517, (-1.30, 0.22, 1.22)), (538, (-1.18, 0.10, 1.32))),
-           chest, track((517, 26.0)), 4.0, 0.08))
-    A(Shot("CAM_S23_Door", [(539, 576)], track((539, (-0.25, -0.95, 1.45)), (552, (1.70, -1.62, 1.52), "smooth"), (576, (1.86, -1.66, 1.56))),
-           head, track((539, 30.0), (556, 34.0), (576, 35.0)), 2.8, 0.1))
-    A(Shot("CAM_S24_Reveal", [(577, 610)],
-           track((577, (1.86, -1.66, 1.56)), (588, (1.90, -1.80, 1.62)), (600, (2.9, -3.1, 2.4), "smooth"), (610, (1.25, -4.3, 2.95), "smooth")),
-           lerp_t(head, const(V((1.4, 30.0, 4.5))), 590, 606), track((577, 35.0), (590, 28.0), (610, 22.0)), 5.6, 0.25))
-    A(Shot("CAM_S25_Proud", [(611, 632)], track((611, (1.30, 0.48, 1.66)), (632, (1.32, 0.34, 1.64))),
-           face, track((611, 38.0), (632, 42.0)), 2.8, 0.1))
-    A(Shot("CAM_S26_Display", [(633, 650)], track((633, (3.6, -3.0, 0.90)), (650, (3.6, -3.15, 0.88))),
-           const(V((-14.0, 24.0, 10.0))), track((633, 30.0)), 8.0, 0.3))
-    A(Shot("CAM_S27_Pullback", [(651, 672)], None, None, track((651, 28.0), (672, 24.0)), 11.0, 0.4))
-    A(Shot("CAM_S28_Title", [(673, 720)], track((673, (0, -12.0, -300.0))), const(V((0, 0, -300.0))), track((673, 50.0)), 11.0, 0.0))
+    WEB = (0.03, 1.56, 1.22)                 # 'webcam', cheated up to eye level (no chin distortion)
+    INS = (-0.17, 1.13, 0.98)                # the laptop screen insert: one consistent angle
+    scr = const(W["laptop_screen"])
+    kb = W["laptop_M"] @ V((0, 0.03, 0.0165))
+
+    # ACT I: calm, near locked-off
+    est = Shot("S01", track((0, (-1.55, -1.42, 1.72)), (1, (-1.05, -0.92, 1.56), "smooth")),
+               None, track((0, 24.0), (1, 27.0)), 4.0, 0.03)
+    est._target = lambda f, e=est: V((0.25, 1.25, 1.05)).lerp(head(f), U.ease(e.t(f), "smooth"))
+    A(est)
+    A(Shot("S02", track((0, (0.50, 0.88, 1.38)), (1, (0.51, 0.91, 1.35))), const(W["notebook_page"] + V((0, 0.03, 0))),
+           track((0, 40.0)), 4.0, 0.02))
+    A(Shot("S03", track((0, WEB), (1, (0.03, 1.55, 1.22))), face, track((0, 30.0)), 2.8, 0.02))
+    A(Shot("S04", track((0, INS), (1, (-0.15, 1.17, 0.97))), scr, track((0, 42.0), (1, 44.0)), 5.6, 0.03))
+    A(Shot("S05", track((0, WEB), (1, (0.03, 1.50, 1.21), "smooth")), face, track((0, 32.0), (1, 36.0)), 2.8, 0.02))
+    A(Shot("S06", track((0, (0.49, 0.89, 1.37)), (1, (0.51, 0.93, 1.33))), const(W["notebook_page"] + V((0, 0.03, 0))),
+           track((0, 42.0)), 4.0, 0.03))
+    # ACT II: the crescendo
+    A(Shot("S07", track((0, W["laptop_M"] @ V((0.20, -0.21, 0.27))), (1, W["laptop_M"] @ V((0.18, -0.19, 0.25)), "smooth")),
+           const(W["laptop_M"] @ V((0.0, 0.02, 0.017))), track((0, 62.0), (1, 66.0)), 8.0, 0.06))
+    A(Shot("S08", track((0, (0.88, 1.52, 1.52)), (1, (0.80, 1.45, 1.47), "in")), const(V((0.08, 1.02, 1.02))),
+           track((0, 26.0)), 5.6, 0.30))
+    A(Shot("S08b", track((0, (-0.39, 0.87, 0.87)), (1, (-0.43, 0.94, 0.85), "in")), const(W["clock"] + V((0.0, 0.0, -0.005))),
+           track((0, 44.0), (1, 52.0)), 2.8, 0.45))
+    A(Shot("S09", track((0, INS), (1, (-0.15, 1.16, 0.97))), scr, track((0, 42.0), (1, 46.0)), 5.6, 0.12))
+    A(Shot("S10", track((0, (0.03, 1.52, 1.22))), face, track((0, 34.0)), 2.8, 0.30))
+    A(Shot("S11", track((0, INS)), scr, track((0, 44.0)), 5.6, 0.02))          # stillness for the punchline
+    # from the notification side: his eyes dart from the code (three-quarter) to the
+    # notification (almost to lens), so both looks read
+    A(Shot("S12", track((0, (0.62, 1.28, 1.32)), (1, (0.60, 1.27, 1.31))), face, track((0, 38.0)), 4.0, 0.02))
+    A(Shot("S13", track((0, INS), (1, (-0.16, 1.15, 0.975))), scr, track((0, 42.0), (1, 48.0)), 5.6, 0.35))
+    A(Shot("S14", track((0, (0.03, 1.57, 1.36)), (0.3, (0.03, 1.36, 1.38), "expo_out"), (1, (0.03, 1.33, 1.38))),
+           face, track((0, 30.0), (0.3, 44.0), (1, 48.0)), 2.8, 0.9))
+    # ACT III: slower, every beat held long enough to read
+    bld = Shot("S15", track((0, (-0.88, 1.58, 1.28)), (1, (-0.80, 1.52, 1.22))), None, track((0, 26.0)), 4.0, 0.25)
+    bld._target = lambda f, e=bld: head(f).lerp(V(W["machine"]), U.ease(e.t(f) / 0.35, "smooth"))
+    A(bld)
+    A(Shot("S16", track((0, (-0.64, 1.00, 0.97)), (1, (-0.60, 1.05, 0.95))), const(W["machine"] + V((0.04, -0.04, -0.03))),
+           track((0, 42.0), (1, 45.0)), 4.0, 0.10))
+    A(Shot("S17", track((0, (0.10, 1.62, 1.42)), (1, (0.10, 1.60, 1.40))), lambda f: face(f).lerp(chest(f), 0.35),
+           track((0, 28.0)), 4.0, 0.02))
+    A(Shot("S18", track((0, INS), (1, (-0.14, 1.18, 0.97), "smooth")), const(W["laptop_screen"] + V((-0.035, 0.0, 0.025))),
+           track((0, 40.0), (1, 44.0)), 5.6, 0.03))
+    slot = W["printer_slot"]
+    # two facts, two shots: (1) it prints HIS roadmap, header readable as it hangs off the desk;
+    # (2) it never stops. Both near locked-off, so nothing smears.
+    A(Shot("S19", track((0, (-0.30, 0.62, 1.00)), (1, (-0.31, 0.68, 0.96), "smooth")),
+           track((0, tuple(slot + V((0, -0.10, -0.08)))), (1, (-0.40, 1.06, 0.52), "smooth")),
+           track((0, 26.0), (1, 28.0)), 8.0, 0.03))
+    A(Shot("S19b", track((0, (-1.40, -1.25, 2.10)), (1, (-1.47, -1.34, 2.17), "smooth")), const(V((0.0, 0.25, 0.25))),
+           track((0, 22.0)), 11.0, 0.02))
+    A(Shot("S20", track((0, WEB)), face, track((0, 30.0)), 2.8, 0.02))
+    A(Shot("S21", track((0, (0.40, 0.68, 1.80)), (1, (0.38, 0.74, 1.76))), scr, track((0, 62.0), (1, 66.0)), 4.0, 0.02))
+    A(Shot("S22", track((0, (0.03, 1.52, 1.23))), face, track((0, 36.0)), 2.8, 0.0))
+    # ACT IV
+    A(Shot("S23", track((0, (-1.30, 0.22, 1.22)), (1, (-1.18, 0.10, 1.32))), chest, track((0, 26.0)), 4.0, 0.04))
+    A(Shot("S24", track((0, (-0.25, -0.95, 1.45)), (0.35, (1.55, -1.55, 1.52), "smooth"), (0.6, (1.92, -1.37, 1.62), "smooth"),
+                        (1, (1.93, -1.41, 1.64))),
+           head, track((0, 30.0), (0.45, 34.0), (1, 36.0)), 2.8, 0.06))
+    rev = Shot("S25", track((0, (1.93, -1.41, 1.64)), (0.3, (1.92, -1.64, 1.66)), (0.65, (2.9, -3.1, 2.4), "smooth"),
+                            (1, (1.25, -4.3, 2.95), "smooth")), None, track((0, 35.0), (0.4, 28.0), (1, 22.0)), 5.6, 0.12)
+    rev._target = lambda f, e=rev: head(f).lerp(V((1.4, 30.0, 4.5)), U.ease((e.t(f) - 0.4) / 0.25, "smooth"))
+    A(rev)
+    A(Shot("S26", track((0, (1.30, 0.48, 1.66)), (1, (1.32, 0.34, 1.64))), face, track((0, 38.0), (1, 42.0)), 2.8, 0.05))
+    A(Shot("S27", track((0, (3.6, -3.0, 0.90)), (1, (3.6, -3.15, 0.88))), const(V((-14.0, 24.0, 10.0))),
+           track((0, 30.0)), 8.0, 0.2))
+    A(Shot("S28", None, const(V((0, 0, 0))), track((0, 28.0), (1, 24.0)), 11.0, 0.25))
+    A(Shot("S29", track((0, (0, -12.0, -300.0))), const(V((0, 0, -300.0))), track((0, 50.0)), 11.0, 0.0))
     ctx.shots = shots
     # where is "the audience"? the active camera position (for direct looks)
     for s in shots:
-        if s.pos is None:
+        if s._pos is None:
             continue
-        for a, b in s.ranges:
-            for f in range(a, b + 1):
-                hero.cam_pos[f] = V(s.pos(f)) + V((0, ch("belt_distance", f), 0))
+        for f in range(s.a, s.b + 1):
+            hero.cam_pos[f] = s.pos(f) + V((0, ch("belt_distance", f), 0))
     cams = {}
     for s in shots:
+        if s.cam in cams:
+            continue
         cd = bpy.data.cameras.new(s.cam)
         cd.sensor_width = 36.0
         cd.clip_start = s.near
         cd.clip_end = 6000.0
-        cd.dof.use_dof = s.cam not in ("CAM_S28_Title",)
+        cd.dof.use_dof = s.cam != "CAM_Title"
         cd.dof.aperture_fstop = s.fstop
         ob = bpy.data.objects.new(s.cam, cd)
         ob.rotation_mode = 'QUATERNION'
@@ -148,29 +187,32 @@ def look_quat(pos, tgt, roll=0.0):
 
 
 def bake(ctx, hero):
-    e = E
+    """Bake every camera: shots sharing a camera write into the same f-curves."""
+    per_cam = {}
     for s in ctx.shots:
-        ob = ctx.cams[s.cam]
-        frames = []
-        for a, b in s.ranges:
-            frames += list(range(max(1, a - 1), min(720, b + 1) + 1))
-        frames = sorted(set(frames))
-        locs, quats, lens, focus = [], [], [], []
+        rows = per_cam.setdefault(s.cam, {})
+        for f in range(max(1, s.a - 1), min(720, s.b + 1) + 1):
+            if f in rows and not (s.a <= f <= s.b):
+                continue                      # a neighbouring shot owns this frame
+            rows[f] = s
+    for cam, rows in per_cam.items():
+        ob = ctx.cams[cam]
+        frames = sorted(rows)
+        locs, quats, lens, focus, fst = [], [], [], [], []
         prev = None
         for f in frames:
+            s = rows[f]
             off = V((0, ch("belt_distance", f), 0))
-            if s.cam == "CAM_S27_Pullback":
+            roll = 0.0
+            if cam == "CAM_Pullback":
                 pos, tgt, roll = pullback(hero, f)
+            elif cam == "CAM_Title":
+                pos, tgt = s.pos(f), s.target(f)
             else:
-                pos = V(s.pos(f)) + off
-                tgt = V(s.target(f))
-                roll = 0.0
-            # targets defined as constants are in station space too
-            if s.cam == "CAM_S28_Title":
-                pos, tgt = V(s.pos(f)), V(s.target(f))
-            elif _is_static_target(s):
-                tgt = tgt + off
-            # handheld: lagged speed intensity drives amplitude
+                pos = s.pos(f) + off
+                tgt = s.target(f)
+                if _is_static_target(s):
+                    tgt = tgt + off
             amp = s.shake * (0.15 + ch("cam_intensity", f)) * 0.012
             n = V((U.fbm(f * 0.11, 3), U.fbm(f * 0.13, 7), U.fbm(f * 0.09, 11))) * amp * (pos - tgt).length
             q = look_quat(pos, tgt + n, roll + amp * 2.0 * U.noise1(f * 0.07, 5))
@@ -181,15 +223,20 @@ def bake(ctx, hero):
             quats.append(tuple(q))
             lens.append(s.lens(f))
             focus.append(max(0.05, (tgt - pos).length))
+            fst.append(s.fstop)
         U.bake_vec(ob, "location", frames, locs)
         U.bake_vec(ob, "rotation_quaternion", frames, quats)
         U.bake(ob.data, "lens", 0, frames, lens)
         U.bake(ob.data, "dof.focus_distance", 0, frames, focus)
+        U.bake(ob.data, "dof.aperture_fstop", 0, frames, fst, 'CONSTANT')
 
 
 def _is_static_target(s):
-    # constant targets were authored in station space; actor targets are already world
-    return getattr(s.target, "__name__", "") == "<lambda>" and s.target.__code__.co_varnames[:2] == ("f", "p")
+    # constant / keyed targets were authored in station space; actor targets are already world
+    tg = s._target
+    if isinstance(tg, U.Track):
+        return True
+    return getattr(tg, "__name__", "") == "<lambda>" and tg.__code__.co_varnames[:2] == ("f", "p")
 
 
 def pullback(hero, f):
